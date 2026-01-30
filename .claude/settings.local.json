@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(~/.local/bin/uv:*)",
+      "Bash(~/.cargo/bin/uv:*)",
+      "Bash(echo:*)",
+      "Bash(pip3:*)",
+      "Bash(uv --version:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nchore: add directory structure for data, analysis, forecasting, ai packages\n\nSkeleton for Phase 1+ modules with empty __init__.py files.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run ruff format:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: add DataAdapter ABC and core Pydantic models\n\n- DataPoint, TimeSeries, DataSourceInfo models in schemas.py\n- DataAdapter abstract base class with async fetch\\(\\) interface\n- Tests for all models and ABC instantiation guard\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
+    ]
+  }
+}
