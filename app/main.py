@@ -1,11 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.data.adapters.pypi import PyPIAdapter
+from app.data.registry import registry
 from app.routers import api
+
+registry.register(PyPIAdapter())
 
 app = FastAPI(
     title="trendlab",
-    description="A python and fast API ai trend building lab. Connect data sources to real world data sets and start visualizing",
+    description=(
+        "AI trend building lab. Connect data sources"
+        " to real world data sets and start visualizing"
+    ),
     version="0.1.0",
 )
 
