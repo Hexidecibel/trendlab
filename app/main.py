@@ -21,6 +21,15 @@ if settings.github_token:
 else:
     logger.warning("GITHUB_TOKEN not set — github_stars adapter will not be available")
 
+if settings.football_data_token:
+    from app.data.adapters.football import FootballDataAdapter
+
+    registry.register(FootballDataAdapter(token=settings.football_data_token))
+else:
+    logger.warning(
+        "FOOTBALL_DATA_TOKEN not set — football adapter will not be available"
+    )
+
 app = FastAPI(
     title="trendlab",
     description=(
