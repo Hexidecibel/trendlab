@@ -27,13 +27,13 @@
 
 **Goal:** Prove the adapter pattern works by adding a second source and a registry to manage them.
 
-- [ ] Implement second adapter: **GitHub stars over time** (using GitHub REST API, optionally authenticated)
-- [ ] Build an `AdapterRegistry` — a simple dict-based registry that maps source names to adapter instances
-- [ ] Add `.env` support for API keys (`GITHUB_TOKEN`, etc.)
-- [ ] Update `/api/sources` to pull from the registry dynamically
-- [ ] Update `/api/series` to resolve adapters via the registry
-- [ ] Add a third adapter stub (e.g., Google Trends or crypto prices) to validate the pattern holds with 3+ sources
-- [ ] Tests for GitHub adapter (mocked) and registry logic
+- [x] Implement second adapter: **GitHub stargazers timeline** (requires `GITHUB_TOKEN`)
+- [x] Build an `AdapterRegistry` — *(done in Phase 1)*
+- [x] Add `.env` support for API keys (`GITHUB_TOKEN`, etc.)
+- [x] Update `/api/sources` to pull from the registry dynamically — *(done in Phase 1)*
+- [x] Update `/api/series` to resolve adapters via the registry — *(done in Phase 1)*
+- [x] Add third adapter: **CoinGecko crypto prices** (free, no auth)
+- [x] Tests for GitHub and CoinGecko adapters (mocked)
 
 **You'll have:** A pluggable data system where adding a new source means writing one class.
 
