@@ -43,15 +43,15 @@
 
 **Goal:** Analyze ingested time-series and output structured trend signals.
 
-- [ ] Implement `trend_metrics.py` — compute: momentum (rate of change), acceleration (second derivative), moving averages (7d, 30d)
-- [ ] Implement `seasonality.py` — detect periodic patterns using autocorrelation or FFT
-- [ ] Implement `anomalies.py` — flag outliers using z-score or IQR methods
-- [ ] Define Pydantic models for analysis output: `TrendSignal`, `SeasonalityResult`, `AnomalyReport`
-- [ ] Implement `structural_breaks.py` — detect regime changes (simple: CUSUM or rolling variance threshold)
-- [ ] Create an `analyze()` orchestrator that runs all detectors on a `TimeSeries` and returns a combined `TrendAnalysis`
-- [ ] Add `/api/analyze` endpoint — accepts source + query, returns trend analysis
-- [ ] Write unit tests for each analysis module with known synthetic data
-- [ ] Write API tests for the analyze endpoint
+- [x] Implement `trend_metrics.py` — compute: momentum (rate of change), acceleration (second derivative), moving averages (7d, 30d)
+- [x] Implement `seasonality.py` — detect periodic patterns using autocorrelation or FFT
+- [x] Implement `anomalies.py` — flag outliers using z-score or IQR methods
+- [x] Define Pydantic models for analysis output: `TrendSignal`, `SeasonalityResult`, `AnomalyReport`
+- [x] Implement `structural_breaks.py` — detect regime changes (simple: CUSUM or rolling variance threshold)
+- [x] Create an `analyze()` orchestrator that runs all detectors on a `TimeSeries` and returns a combined `TrendAnalysis`
+- [x] Add `/api/analyze` endpoint — accepts source + query, returns trend analysis
+- [x] Write unit tests for each analysis module with known synthetic data
+- [x] Write API tests for the analyze endpoint
 
 **You'll have:** An API that tells you *what's happening* in a trend — not just the raw numbers.
 

@@ -412,7 +412,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Add numpy dependency
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -437,7 +437,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Analysis Pydantic models
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -504,7 +504,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Trend metrics module (`trend_metrics.py`)
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -550,7 +550,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Seasonality detection module (`seasonality.py`)
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -597,7 +597,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Anomaly detection module (`anomalies.py`)
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -632,7 +632,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Structural breaks module (`structural_breaks.py`)
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -663,7 +663,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: Analysis orchestrator (`engine.py`)
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
@@ -693,7 +693,7 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 ---
 
 ## Item: `/api/analyze` endpoint
-**Status:** planned
+**Status:** done
 **Phase:** 3
 
 ### Requirements
