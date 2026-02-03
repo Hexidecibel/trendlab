@@ -23,9 +23,10 @@ class TestSourcesEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        assert len(data) >= 1
+        assert len(data) >= 2
         names = [s["name"] for s in data]
         assert "pypi" in names
+        assert "crypto" in names
 
     @pytest.mark.asyncio
     async def test_source_has_description(self, client: AsyncClient):

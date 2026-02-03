@@ -1,11 +1,25 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
+from app.data.adapters.coingecko import CoinGeckoAdapter
 from app.data.adapters.pypi import PyPIAdapter
 from app.data.registry import registry
 from app.routers import api
 
+logger = logging.getLogger(__name__)
+
 registry.register(PyPIAdapter())
+registry.register(CoinGeckoAdapter())
+
+if settings.github_token:
+    from app.data.adapters.github import GitHubStarsAdapter
+
+    registry.register(GitHubStarsAdapter(token=settings.github_token))
+else:
+    logger.warning("GITHUB_TOKEN not set — github_stars adapter will not be available")
 
 app = FastAPI(
     title="trendlab",
