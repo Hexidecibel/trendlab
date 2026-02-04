@@ -13,7 +13,23 @@
       "Bash(uv run ruff:*)",
       "Bash(uv run ruff format:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: add DataAdapter ABC and core Pydantic models\n\n- DataPoint, TimeSeries, DataSourceInfo models in schemas.py\n- DataAdapter abstract base class with async fetch\\(\\) interface\n- Tests for all models and ABC instantiation guard\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(uv run python:*)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:www.coingecko.com)",
+      "WebFetch(domain:docs.coingecko.com)",
+      "WebFetch(domain:www.football-data.org)",
+      "WebFetch(domain:docs.football-data.org)",
+      "WebSearch",
+      "WebFetch(domain:publicapis.io)",
+      "Bash(curl:*)",
+      "Bash(wc:*)",
+      "Bash(git -C /Users/chriscushman/local/src/trendlab log --oneline -20)",
+      "Bash(git -C /Users/chriscushman/local/src/trendlab diff .claude/settings.local.json)",
+      "Bash(npm install:*)",
+      "Bash(ipconfig getifaddr:*)",
+      "WebFetch(domain:app.americansocceranalysis.com)",
+      "Bash(python3:*)"
     ]
   }
 }
