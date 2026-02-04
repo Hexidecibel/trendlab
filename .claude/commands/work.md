@@ -4,7 +4,7 @@ Implement items from plan.md using TDD.
 
 ## Instructions
 
-1. Read `/Users/chriscushman/local/src/trendlab/plan.md`
+1. Read `plan.md`
 
 2. Find the next item with **Status: planned** or **Status: in-progress**
 
@@ -14,19 +14,19 @@ Implement items from plan.md using TDD.
       - Create/update test files based on "Tests Needed" section
       - Run tests - they should fail (red):
         ```bash
-        cd /Users/chriscushman/local/src/trendlab && uv run pytest
+        uv run pytest
         ```
 
    b. **Implement the feature**
       - Follow the "Implementation Steps" from plan
       - Install any dependencies listed:
         ```bash
-        cd /Users/chriscushman/local/src/trendlab && uv add <package>
+        uv add <package>
         ```
       - Make tests pass (green)
       - Run linter:
         ```bash
-        cd /Users/chriscushman/local/src/trendlab && uv run ruff check . && uv run ruff format .
+        uv run ruff check . && uv run ruff format .
         ```
 
    c. **Refactor if needed**
@@ -41,12 +41,12 @@ Implement items from plan.md using TDD.
 
    a. **Run full test suite**
       ```bash
-      cd /Users/chriscushman/local/src/trendlab && uv run pytest -v
+      uv run pytest -v
       ```
 
    b. **Run linter**
       ```bash
-      cd /Users/chriscushman/local/src/trendlab && uv run ruff check .
+      uv run ruff check .
       ```
 
    c. **Report completion**
