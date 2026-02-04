@@ -12,6 +12,8 @@ from app.config import settings
 from app.data.registry import registry
 from app.forecasting.engine import forecast
 from app.models.schemas import (
+    CompareRequest,
+    CompareResponse,
     DataSourceInfo,
     ForecastComparison,
     LookupItem,
@@ -155,6 +157,40 @@ async def forecast_series(
         return forecast(ts, horizon=horizon)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/compare", response_model=CompareResponse)
+async def compare_series(request: CompareRequest):
+    """Fetch and return multiple series for side-by-side comparison."""
+    result_series: list[TimeSeries] = []
+
+    for item in request.items:
+        try:
+            adapter = registry.get(item.source)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail=f"Source '{item.source}' not found"
+            )
+
+        try:
+            ts = await _cache.fetch(
+                adapter,
+                item.query,
+                start=item.start,
+                end=item.end,
+                refresh=request.refresh,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+        if request.resample:
+            ts = resample_series(
+                ts, request.resample, method=adapter.aggregation_method
+            )
+
+        result_series.append(ts)
+
+    return CompareResponse(series=result_series, count=len(result_series))
 
 
 @router.get("/insight")

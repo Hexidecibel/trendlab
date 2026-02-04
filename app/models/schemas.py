@@ -162,6 +162,31 @@ class InsightReport(BaseModel):
 # --- Natural Language Query models ---
 
 
+# --- Comparison models ---
+
+
+class CompareItem(BaseModel):
+    source: str
+    query: str
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+
+
+class CompareRequest(BaseModel):
+    items: list[CompareItem] = Field(..., min_length=2, max_length=3)
+    resample: str | None = None
+    apply: str | None = None
+    refresh: bool = False
+
+
+class CompareResponse(BaseModel):
+    series: list[TimeSeries]
+    count: int
+
+
+# --- Natural Language Query models ---
+
+
 class NaturalQueryRequest(BaseModel):
     text: str = Field(..., min_length=3, max_length=500)
 
