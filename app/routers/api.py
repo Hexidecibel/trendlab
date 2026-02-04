@@ -21,6 +21,7 @@ from app.models.schemas import (
     TimeSeries,
     TrendAnalysis,
 )
+from app.services.aggregation import resample_series
 from app.services.cache import CachedFetcher
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,9 @@ async def get_series(
     start: datetime.date | None = Query(None, description="Start date filter"),
     end: datetime.date | None = Query(None, description="End date filter"),
     refresh: bool = Query(False, description="Bypass cache"),
+    resample: str | None = Query(
+        None, description="Resample frequency: week, month, quarter, season"
+    ),
 ):
     """Fetch time-series data from a named source."""
     try:
@@ -78,9 +82,13 @@ async def get_series(
         raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
 
     try:
-        return await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
+        ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    if resample:
+        ts = resample_series(ts, resample, method=adapter.aggregation_method)
+    return ts
 
 
 @router.get("/analyze", response_model=TrendAnalysis)
@@ -93,6 +101,9 @@ async def analyze_series(
         "zscore", description="Anomaly detection method: zscore or iqr"
     ),
     refresh: bool = Query(False, description="Bypass cache"),
+    resample: str | None = Query(
+        None, description="Resample frequency: week, month, quarter, season"
+    ),
 ):
     """Fetch time-series data and run trend analysis."""
     try:
@@ -104,6 +115,9 @@ async def analyze_series(
         ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    if resample:
+        ts = resample_series(ts, resample, method=adapter.aggregation_method)
 
     try:
         return analyze(ts, anomaly_method=anomaly_method)
@@ -119,6 +133,9 @@ async def forecast_series(
     start: datetime.date | None = Query(None, description="Start date filter"),
     end: datetime.date | None = Query(None, description="End date filter"),
     refresh: bool = Query(False, description="Bypass cache"),
+    resample: str | None = Query(
+        None, description="Resample frequency: week, month, quarter, season"
+    ),
 ):
     """Fetch time-series data and run forecasting with multiple models."""
     try:
@@ -130,6 +147,9 @@ async def forecast_series(
         ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    if resample:
+        ts = resample_series(ts, resample, method=adapter.aggregation_method)
 
     try:
         return forecast(ts, horizon=horizon)

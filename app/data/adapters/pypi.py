@@ -12,6 +12,7 @@ PYPI_STATS_URL = "https://pypistats.org/api/packages/{package}/overall"
 class PyPIAdapter(DataAdapter):
     name = "pypi"
     description = "PyPI package download counts (last 180 days)"
+    aggregation_method = "sum"
 
     def form_fields(self) -> list[FormField]:
         return [

@@ -7,6 +7,7 @@ from app.models.schemas import FormField, LookupItem, TimeSeries
 class DataAdapter(ABC):
     name: str
     description: str
+    aggregation_method: str = "mean"
 
     @abstractmethod
     async def fetch(
