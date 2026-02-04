@@ -61,15 +61,13 @@
 
 **Goal:** Predict where a trend is heading using multiple models, then compare them.
 
-- [ ] Implement `baseline.py` — naive forecasts: last value, moving average projection, linear extrapolation
-- [ ] Implement `prophet_model.py` — Facebook Prophet wrapper for time-series forecasting
-- [ ] Add `prophet` (or `neuralprophet`) to project dependencies
-- [ ] Implement `evaluator.py` — backtest framework: train/test split, compute MAE, RMSE, MAPE per model
-- [ ] Define Pydantic models: `Forecast` (point + confidence interval), `ModelEvaluation`, `ForecastComparison`
-- [ ] Create a `forecast()` orchestrator that runs all models, evaluates, and ranks them
-- [ ] Add `/api/forecast` endpoint — accepts source + query + horizon, returns forecasts from all models with evaluation scores
-- [ ] Optionally add an ARIMA-based model (`statsmodels`) as a third contender
-- [ ] Write tests: unit tests for each model with synthetic data, API tests for forecast endpoint
+- [x] Implement `baseline.py` — naive forecasts: last value, moving average projection, linear extrapolation
+- [x] Implement `statistical.py` — AutoETS wrapper via statsforecast (replaced Prophet plan; statsforecast already a dependency)
+- [x] Implement `evaluation.py` — backtest framework: train/test split, compute MAE, RMSE, MAPE per model
+- [x] Define Pydantic models: `ForecastPoint` (point + confidence interval), `ModelEvaluation`, `ForecastComparison` (defined in Phase 3 schemas)
+- [x] Create a `forecast()` orchestrator that runs all 4 models, evaluates, and ranks by lowest MAE
+- [x] Add `/api/forecast` endpoint — accepts source + query + horizon (1-365, default 14), returns forecasts from all models with evaluation scores
+- [x] Write tests: unit tests for each model with synthetic data, API tests for forecast endpoint (52 new tests)
 
 **You'll have:** An API that answers "where is this going?" with multiple competing opinions and honest evaluation.
 
@@ -79,14 +77,14 @@
 
 **Goal:** Use an LLM to generate natural-language summaries of trends and forecasts.
 
-- [ ] Set up LLM integration — choose provider (OpenAI, Anthropic, or local via Ollama) and add SDK dependency
-- [ ] Implement `summarizer.py` — takes `TrendAnalysis` + `ForecastComparison` and generates a narrative
-- [ ] Create prompt templates in `app/ai/prompts/` — structured prompts for: trend summary, forecast explanation, risk flags, "if this continues..." narratives
-- [ ] Define Pydantic models: `Commentary`, `RiskFlag`, `InsightReport`
-- [ ] Add `/api/insight` endpoint — the full pipeline: fetch data → analyze → forecast → summarize
-- [ ] Add streaming support for the commentary (SSE via FastAPI `StreamingResponse`)
-- [ ] Implement prompt versioning / selection (swap prompt strategies without code changes)
-- [ ] Tests for summarizer (mocked LLM responses), API tests for insight endpoint
+- [x] Set up LLM integration — Anthropic Claude via `anthropic` SDK, add dependency + config
+- [x] Implement `summarizer.py` — takes `TrendAnalysis` + `ForecastComparison` and generates a narrative via Claude
+- [x] Create prompt templates in `app/ai/prompts.py` — Python module with versioned prompts (default, concise, detailed)
+- [x] Implement `app/ai/client.py` — async Anthropic SDK wrapper with generate + stream methods
+- [x] Define Pydantic models: `RiskFlag`, `InsightReport` in `schemas.py`
+- [x] Add `/api/insight` endpoint — SSE streaming: fetch data → analyze → forecast → stream LLM commentary
+- [x] Implement prompt versioning / selection (swap prompt strategies without code changes)
+- [x] Tests for all modules (mocked LLM responses), API tests for SSE insight endpoint (37 new tests)
 
 **You'll have:** An endpoint that returns something like: *"PyPI downloads for fastapi accelerated 3x over the last 14 days. Prophet and baseline models agree on continued growth, but variance is rising — this could be a spike, not sustained momentum."*
 
@@ -96,16 +94,16 @@
 
 **Goal:** Make the data visible — a lightweight frontend that renders charts from the API.
 
-- [ ] Choose frontend approach: static HTML + Chart.js (simplest), or lightweight React/Vite app
-- [ ] Implement time-series line chart with raw data
-- [ ] Add forecast overlay with confidence bands (shaded region)
-- [ ] Add trend strength indicator (colored bar or gauge)
-- [ ] Add seasonality heatmap (day-of-week or month grid)
-- [ ] Add "now vs 30 days ago" comparison view
-- [ ] Display AI commentary alongside charts
-- [ ] Add source selector and query input
-- [ ] Serve the frontend from FastAPI (static files or proxy in dev)
-- [ ] Basic responsive layout — works on desktop and tablet
+- [planned] Choose frontend approach: React + Vite + Tailwind CSS, built and served from FastAPI
+- [planned] Implement time-series line chart with raw data (Chart.js via react-chartjs-2)
+- [planned] Add forecast overlay with confidence bands (shaded region) + model selector
+- [planned] Add trend analysis panel (direction indicator, seasonality, anomalies, breaks)
+- [planned] Add model comparison table (MAE/RMSE/MAPE, sortable, recommended highlighted)
+- [planned] Display AI commentary alongside charts (optional, graceful degradation if Phase 5 not implemented)
+- [planned] Add source selector, query input, and horizon control
+- [planned] Serve the frontend from FastAPI (StaticFiles mount, SPA catch-all)
+- [planned] Basic responsive layout — 2-col desktop, stacked tablet/mobile
+- [planned] API client module with TypeScript types matching Pydantic schemas
 
 **You'll have:** A dashboard you can open in a browser, pick a data source, and see trends + forecasts + AI commentary in one view.
 

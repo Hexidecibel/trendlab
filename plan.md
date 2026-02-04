@@ -732,3 +732,793 @@ Items 3-5 can overlap but should be committed in this order for clean git histor
 8. `/api/analyze` endpoint (+ API tests)
 
 Items 3-6 are independent of each other and can be developed in any order.
+
+---
+---
+
+# Phase 5: AI Commentary Layer
+
+> Use an LLM (Anthropic Claude) to generate natural-language summaries of
+> trends and forecasts, exposed via a streaming SSE endpoint.
+
+---
+
+## Item: Add Anthropic SDK dependency
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- Add `anthropic` Python SDK for calling Claude API
+- Add `ANTHROPIC_API_KEY` to the config module
+- Commentary layer is optional — app should start without the key (endpoint returns 503)
+
+### Files to Create/Modify
+- `pyproject.toml` — add `anthropic>=0.40.0` to main dependencies
+- `app/config.py` — add `anthropic_api_key` setting
+
+### Implementation Steps
+1. Add `"anthropic>=0.40.0"` to `[project] dependencies` in `pyproject.toml`
+2. Add `self.anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")` to `Settings.__init__` in `app/config.py`
+3. Run `uv sync` to update lockfile
+4. Verify import: `python -c "import anthropic; print(anthropic.__version__)"`
+
+### Dependencies to Add
+- `anthropic>=0.40.0` — Anthropic Python SDK for Claude API access
+
+### Tests Needed
+- Test that `Settings` reads `ANTHROPIC_API_KEY` from environment
+- Test that missing key defaults to `None`
+
+---
+
+## Item: Prompt templates module (`app/ai/prompts.py`)
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- Store all prompt templates as Python string constants/functions in a single module
+- Support a versioned prompt selection mechanism (swap strategies without code changes)
+- Prompts should accept structured data (TrendAnalysis + ForecastComparison) and format them into LLM-ready text
+- Four prompt types: trend summary, forecast explanation, risk flags, narrative ("if this continues...")
+
+### Files to Create/Modify
+- `app/ai/prompts.py` — prompt templates and formatter functions
+
+### Implementation Steps
+1. Create a `format_analysis_context(analysis: TrendAnalysis, forecast: ForecastComparison) -> str` function that serializes the structured data into a clean text block the LLM can reason over. Include:
+   - Series metadata (source, query, length)
+   - Trend direction, momentum, acceleration
+   - Seasonality status and period
+   - Anomaly count and notable outliers
+   - Structural break count and dates
+   - Forecast model rankings (name, MAE) and recommended model
+   - Forecast values for the recommended model (first/middle/last points + CI range)
+2. Define `SYSTEM_PROMPT: str` — the system message establishing the role: concise data analyst that explains trends to non-technical users, avoids jargon, includes caveats
+3. Define a `PROMPT_REGISTRY: dict[str, str]` mapping version names to user prompt templates:
+   - `"default"` — balanced summary covering all aspects
+   - `"concise"` — 2-3 sentence executive summary
+   - `"detailed"` — thorough analysis with section headers
+4. Each prompt template uses `{context}` placeholder that gets filled with the formatted analysis context
+5. Create `get_prompt(version: str = "default") -> str` that returns the template, raising `ValueError` for unknown versions
+6. Create `build_messages(analysis, forecast, version="default") -> list[dict]` that returns the `[{"role": "system", ...}, {"role": "user", ...}]` message list ready for the Anthropic API
+
+### Dependencies to Add
+- None (pure Python, references Pydantic models)
+
+### Tests Needed
+- Test `format_analysis_context` produces non-empty string containing key data points (source name, direction, recommended model)
+- Test `get_prompt("default")` returns a string containing `{context}`
+- Test `get_prompt("unknown")` raises `ValueError`
+- Test `build_messages` returns a list with system and user messages
+- Test that all registered prompt versions are valid (contain `{context}`)
+
+---
+
+## Item: LLM client module (`app/ai/client.py`)
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- Thin wrapper around the Anthropic SDK that handles initialization, error handling, and both streaming/non-streaming calls
+- Uses `anthropic.AsyncAnthropic` for async compatibility with FastAPI
+- Configurable model name (default to `claude-sonnet-4-20250514`)
+- Returns raw text for non-streaming, async generator of text chunks for streaming
+
+### Files to Create/Modify
+- `app/ai/client.py` — LLM client class
+
+### Implementation Steps
+1. Create `class LLMClient`:
+   - `__init__(self, api_key: str, model: str = "claude-sonnet-4-20250514")` — stores key and model, creates `anthropic.AsyncAnthropic(api_key=api_key)`
+   - `async def generate(self, messages: list[dict], max_tokens: int = 1024) -> str` — non-streaming call, returns full text response
+   - `async def stream(self, messages: list[dict], max_tokens: int = 1024) -> AsyncGenerator[str, None]` — streaming call, yields text deltas as they arrive
+2. In `generate()`:
+   - Call `self.client.messages.create(model=self.model, max_tokens=max_tokens, system=system_msg, messages=user_msgs)`
+   - Extract and return `response.content[0].text`
+   - Catch `anthropic.APIError` and re-raise as a domain-specific error (or let it propagate)
+3. In `stream()`:
+   - Use `async with self.client.messages.stream(...)` context manager
+   - `async for text in stream.text_stream:` yield each chunk
+4. Handle the message format: Anthropic API takes `system` as a separate param, not in the messages list. The `build_messages()` from prompts.py returns `[{"role": "system", ...}, {"role": "user", ...}]` — the client should split these.
+
+### Dependencies to Add
+- None (uses `anthropic` added in the dependency item)
+
+### Tests Needed
+- Test `generate()` with a mocked `AsyncAnthropic` — verify correct model and message passing
+- Test `stream()` with a mocked streaming response — verify yields text chunks
+- Test that system message is extracted and passed as `system` param (not in messages list)
+
+---
+
+## Item: Summarizer module (`app/ai/summarizer.py`)
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- Takes `TrendAnalysis` + `ForecastComparison` and generates a natural-language `InsightReport`
+- Uses the prompt templates module to build messages and the LLM client to call Claude
+- Returns structured `InsightReport` with parsed fields
+- Also provides a streaming variant that yields text chunks
+- Gracefully handles LLM errors (timeout, rate limit, etc.)
+
+### Files to Create/Modify
+- `app/ai/summarizer.py` — main summarizer logic
+
+### Implementation Steps
+1. Create `async def summarize(analysis: TrendAnalysis, forecast: ForecastComparison, prompt_version: str = "default", client: LLMClient | None = None) -> InsightReport`:
+   - Build messages using `prompts.build_messages(analysis, forecast, version=prompt_version)`
+   - Call `client.generate(messages)`
+   - Parse the raw text into an `InsightReport`:
+     - `source`, `query` from the analysis
+     - `summary` = the full LLM response text
+     - `risk_flags` = extract bullet points or keywords about risks (or empty list if none mentioned)
+     - `recommended_action` = extract a one-line recommendation if present (or None)
+     - `prompt_version` = the version used
+   - Return `InsightReport`
+2. Create `async def summarize_stream(analysis, forecast, prompt_version="default", client=None) -> AsyncGenerator[str, None]`:
+   - Build messages same way
+   - Yield chunks from `client.stream(messages)`
+3. If `client` is None, create one using `settings.anthropic_api_key` — raise `ValueError("ANTHROPIC_API_KEY not configured")` if key is missing
+4. Wrap LLM calls in try/except — catch `anthropic.APIError`, log warning, raise a `RuntimeError` with user-friendly message
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- Test `summarize()` with mocked LLM client returning canned text — verify `InsightReport` fields populated
+- Test `summarize_stream()` with mocked streaming client — verify yields chunks
+- Test missing API key raises `ValueError`
+- Test LLM error is caught and re-raised with descriptive message
+
+---
+
+## Item: Pydantic models for Phase 5 (`Commentary`, `RiskFlag`, `InsightReport`)
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- Define output models for the AI commentary layer
+- Keep it simple — the LLM returns free-form text, we wrap it in structure
+
+### Files to Create/Modify
+- `app/models/schemas.py` — add new models at the bottom
+
+### Implementation Steps
+1. Define `RiskFlag` model:
+   - `label: str` — short risk identifier (e.g. "volatility_spike", "data_insufficient")
+   - `description: str` — one-sentence explanation
+2. Define `InsightReport` model:
+   - `source: str` — data source name
+   - `query: str` — original query
+   - `summary: str` — full LLM-generated narrative text
+   - `risk_flags: list[RiskFlag]` — extracted risk indicators (can be empty)
+   - `recommended_action: str | None` — one-line suggestion (optional)
+   - `prompt_version: str` — which prompt template was used
+   - `model_used: str` — which LLM model generated this
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- Test `InsightReport` serialization round-trip
+- Test with empty `risk_flags` and `None` recommended_action
+- Test all fields appear in `.model_dump()` output
+
+---
+
+## Item: `/api/insight` streaming SSE endpoint
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- `GET /api/insight?source=...&query=...` — full pipeline: fetch → analyze → forecast → summarize via LLM
+- Returns SSE (Server-Sent Events) stream via `StreamingResponse`
+- Streams the LLM text as it generates, then sends a final JSON event with the structured `InsightReport`
+- Falls back to 503 if `ANTHROPIC_API_KEY` is not configured
+- Optional params: `start`, `end`, `horizon` (for forecast), `prompt_version` (default "default")
+
+### Files to Create/Modify
+- `app/routers/api.py` — add the new streaming endpoint
+
+### Implementation Steps
+1. Add `GET /insight` route:
+   ```python
+   @router.get("/insight")
+   async def insight_stream(
+       source: str = Query(...),
+       query: str = Query(...),
+       horizon: int = Query(14, ge=1, le=365),
+       start: datetime.date | None = Query(None),
+       end: datetime.date | None = Query(None),
+       prompt_version: str = Query("default"),
+   ):
+   ```
+2. Inside the handler:
+   - Check `settings.anthropic_api_key` — if None, return 503 with detail "ANTHROPIC_API_KEY not configured"
+   - Resolve adapter, fetch `ts` (same pattern as other endpoints)
+   - Run `analyze(ts)` and `forecast(ts, horizon=horizon)`
+   - Create an async generator that:
+     - Sends an initial `event: status` SSE with `data: {"stage": "analyzing"}` (optional — nice UX hint)
+     - Calls `summarize_stream(analysis, forecast, prompt_version=prompt_version)`
+     - Yields each text chunk as `event: delta\ndata: {chunk}\n\n`
+     - After streaming completes, runs `summarize()` (non-streaming) to get the structured `InsightReport` (or builds it from the accumulated text)
+     - Sends a final `event: complete\ndata: {insight_report_json}\n\n`
+   - Return `StreamingResponse(generator(), media_type="text/event-stream")`
+3. Error handling: wrap in try/except, send `event: error\ndata: {message}\n\n` on failure
+
+### Dependencies to Add
+- None (FastAPI `StreamingResponse` is built-in, `sse-starlette` not needed for basic SSE)
+
+### Tests Needed
+- Test successful SSE stream — mock adapter + LLM, verify response is `text/event-stream`
+- Test SSE events contain `delta` and `complete` event types
+- Test missing API key returns 503
+- Test unknown source returns 404
+- Test missing query returns 422
+- Test `prompt_version` parameter is accepted
+
+---
+
+## Item: Update `app/ai/__init__.py` exports
+**Status:** done
+**Phase:** 5
+
+### Requirements
+- Export the main public API from the `app/ai` package
+
+### Files to Create/Modify
+- `app/ai/__init__.py` — add exports
+
+### Implementation Steps
+1. Add `from app.ai.summarizer import summarize, summarize_stream`
+2. Add `__all__ = ["summarize", "summarize_stream"]`
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (verified by import in other tests)
+
+---
+
+## Phase 5 Execution Order
+
+1. Add `anthropic` dependency + config (`pyproject.toml`, `app/config.py`)
+2. Pydantic models (`InsightReport`, `RiskFlag` in `schemas.py`)
+3. Prompt templates (`app/ai/prompts.py` + tests)
+4. LLM client (`app/ai/client.py` + tests)
+5. Summarizer (`app/ai/summarizer.py` + tests)
+6. SSE endpoint (`/api/insight` in `app/routers/api.py` + API tests)
+7. Update `app/ai/__init__.py`
+8. Full test suite + lint
+
+Items 3 and 4 are independent of each other and can be developed in either order.
+
+---
+
+## Files Summary
+
+### New Files (4 modules + 4 test files)
+
+| File | Purpose |
+|------|---------|
+| `app/ai/prompts.py` | Prompt templates, context formatter, version registry |
+| `app/ai/client.py` | Async Anthropic SDK wrapper (generate + stream) |
+| `app/ai/summarizer.py` | Orchestrator: build prompts → call LLM → return InsightReport |
+| `tests/test_prompts.py` | Unit tests for prompt formatting and version registry |
+| `tests/test_llm_client.py` | Unit tests for LLM client (mocked Anthropic SDK) |
+| `tests/test_summarizer.py` | Unit tests for summarizer (mocked LLM client) |
+| `tests/test_api_insight.py` | API endpoint tests for SSE streaming (mocked adapter + LLM) |
+
+### Modified Files (4)
+
+| File | Change |
+|------|--------|
+| `pyproject.toml` | Add `anthropic>=0.40.0` dependency |
+| `app/config.py` | Add `anthropic_api_key` setting |
+| `app/models/schemas.py` | Add `RiskFlag`, `InsightReport` models |
+| `app/routers/api.py` | Add `GET /api/insight` SSE endpoint |
+| `app/ai/__init__.py` | Export `summarize`, `summarize_stream` |
+
+---
+
+## Key Design Decisions
+
+- **Anthropic Claude via official SDK** — async-native, streaming built-in, clean API
+- **Default model: `claude-sonnet-4-20250514`** — fast, cost-effective for summaries; configurable via constructor
+- **Prompts as Python constants** — type-safe, versionable, no file I/O or template engine dependencies
+- **SSE streaming** — progressive text delivery via `text/event-stream`, works with browser `EventSource`; final `complete` event carries the structured `InsightReport` JSON
+- **Graceful degradation** — app starts without `ANTHROPIC_API_KEY`; `/api/insight` returns 503, all other endpoints unaffected
+- **Mocked tests throughout** — no real LLM calls in tests; mock at the SDK boundary
+- **Risk flags extracted from LLM text** — simple keyword/pattern matching on the response; not perfect but useful. Can be improved later with structured output or tool use
+
+---
+---
+
+# Phase 6: Visualization & Dashboard
+
+> React + Vite SPA with Tailwind CSS, served as static files from FastAPI.
+> Charts via Chart.js (react-chartjs-2). Independent of Phase 5 — AI commentary
+> section is shown only if `/api/insight` is available.
+
+---
+
+## Item: Scaffold React + Vite + Tailwind project
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Create a `frontend/` directory at the project root with a Vite + React + TypeScript setup
+- Add Tailwind CSS for styling
+- Configure Vite to build output into `frontend/dist/`
+- FastAPI serves `frontend/dist/` as static files in production
+- During development, Vite dev server proxies API requests to FastAPI on port 8000
+
+### Files to Create/Modify
+- `frontend/` — new directory (entire React project)
+- `frontend/package.json` — dependencies: react, react-dom, react-chartjs-2, chart.js, tailwindcss
+- `frontend/vite.config.ts` — proxy `/api` to `http://localhost:8000`, build output to `dist/`
+- `frontend/tailwind.config.js` — content paths for Tailwind purge
+- `frontend/postcss.config.js` — Tailwind + autoprefixer
+- `frontend/tsconfig.json` — TypeScript config
+- `frontend/index.html` — Vite entry point
+- `frontend/src/main.tsx` — React entry point
+- `frontend/src/App.tsx` — root component with layout shell
+- `frontend/src/index.css` — Tailwind directives (`@tailwind base/components/utilities`)
+- `app/main.py` — mount `StaticFiles` for `frontend/dist` and serve `index.html` as catch-all
+
+### Implementation Steps
+1. Run `npm create vite@latest frontend -- --template react-ts` (or scaffold manually)
+2. Install dependencies: `npm install react-chartjs-2 chart.js`
+3. Install dev dependencies: `npm install -D tailwindcss @tailwindcss/vite`
+4. Configure `vite.config.ts`:
+   - Set `server.proxy` to forward `/api` and `/health` to `http://localhost:8000`
+   - Set `build.outDir` to `dist`
+5. Configure Tailwind (via Vite plugin + CSS import)
+6. Create minimal `App.tsx` with a header and placeholder content
+7. Update `app/main.py`:
+   - Add `from fastapi.staticfiles import StaticFiles`
+   - Mount `app.mount("/", StaticFiles(directory="frontend/dist", html=True))` — AFTER the API router so `/api/*` takes priority
+   - Only mount if `frontend/dist` directory exists (don't crash if frontend isn't built)
+8. Add `frontend/dist/` to `.gitignore`
+9. Verify: `cd frontend && npm run dev` opens the app with Tailwind styles working
+
+### Dependencies to Add
+- `react`, `react-dom`, `react-chartjs-2`, `chart.js` (npm, frontend)
+- `tailwindcss`, `@tailwindcss/vite` (npm dev, frontend)
+- No new Python dependencies
+
+### Tests Needed
+- None (verified manually — frontend scaffolding)
+
+---
+
+## Item: API client module and TypeScript types
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Type-safe TypeScript client for all backend API endpoints
+- Types mirror the Pydantic schemas: `TimeSeries`, `DataPoint`, `TrendAnalysis`, `ForecastComparison`, etc.
+- Fetch functions for each endpoint: `fetchSources`, `fetchSeries`, `fetchAnalysis`, `fetchForecast`
+- Optional `fetchInsight` that returns an `EventSource` for SSE (Phase 5 dependent — only used if available)
+
+### Files to Create/Modify
+- `frontend/src/api/types.ts` — TypeScript interfaces matching Pydantic models
+- `frontend/src/api/client.ts` — fetch wrappers for each endpoint
+
+### Implementation Steps
+1. Define interfaces in `types.ts`:
+   - `DataPoint { date: string; value: number }`
+   - `TimeSeries { source: string; query: string; points: DataPoint[]; metadata: Record<string, unknown> }`
+   - `DataSourceInfo { name: string; description: string }`
+   - `TrendSignal`, `SeasonalityResult`, `AnomalyReport`, `StructuralBreak`, `TrendAnalysis`
+   - `ForecastPoint`, `ModelForecast`, `ModelEvaluation`, `ForecastComparison`
+   - `InsightReport` (for Phase 5, optional)
+2. Create fetch functions in `client.ts`:
+   - `fetchSources(): Promise<DataSourceInfo[]>` — `GET /api/sources`
+   - `fetchSeries(source, query, start?, end?): Promise<TimeSeries>` — `GET /api/series`
+   - `fetchAnalysis(source, query, start?, end?, anomalyMethod?): Promise<TrendAnalysis>` — `GET /api/analyze`
+   - `fetchForecast(source, query, horizon?, start?, end?): Promise<ForecastComparison>` — `GET /api/forecast`
+3. All fetch functions handle errors (non-200 responses) by throwing with the API error detail
+4. Use `URLSearchParams` for query string building
+
+### Dependencies to Add
+- None (uses built-in `fetch` API)
+
+### Tests Needed
+- None (integration tested via the dashboard components)
+
+---
+
+## Item: Source selector and query input component
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Dropdown to select a data source (populated from `/api/sources`)
+- Text input for the query (e.g. package name, repo, coin ID)
+- Placeholder text updates based on selected source (e.g. "fastapi" for PyPI, "owner/repo" for GitHub)
+- Submit button to load data
+- Optional date range inputs (start/end)
+- Horizon selector for forecast (slider or number input, 1-365, default 14)
+
+### Files to Create/Modify
+- `frontend/src/components/QueryForm.tsx` — the form component
+- `frontend/src/hooks/useApi.ts` — custom hook managing fetch state (loading, error, data)
+
+### Implementation Steps
+1. Create `useApi` hook:
+   - State: `loading`, `error`, `sources`, `series`, `analysis`, `forecast`
+   - On mount: fetch sources list
+   - `loadData(source, query, horizon, start?, end?)`: fetches series, analysis, and forecast in parallel
+2. Create `QueryForm` component:
+   - Source dropdown populated from `sources` state
+   - Query text input with dynamic placeholder
+   - Horizon number input (default 14)
+   - Submit button — calls `loadData`
+   - Loading spinner state
+   - Error display (red alert banner)
+3. Style with Tailwind: clean card layout, responsive flex/grid
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (UI component — tested manually)
+
+---
+
+## Item: Time-series line chart with raw data
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Line chart showing the raw `TimeSeries` data points (date vs value)
+- X-axis: dates, Y-axis: values
+- Tooltip on hover showing exact date and value
+- Zoom: Chart.js zoom plugin for click-drag date range zoom
+- Responsive: fills container width
+
+### Files to Create/Modify
+- `frontend/src/components/charts/SeriesChart.tsx` — the chart component
+- `frontend/src/components/Dashboard.tsx` — main dashboard layout composing all charts
+
+### Implementation Steps
+1. Install `chartjs-plugin-zoom` and `chartjs-adapter-date-fns` (for time axis):
+   - `npm install chartjs-plugin-zoom chartjs-adapter-date-fns date-fns`
+2. Register Chart.js plugins in `main.tsx`:
+   - `Chart.register(...registerables)`, zoom plugin
+3. Create `SeriesChart` component:
+   - Props: `series: TimeSeries`
+   - Render a `<Line>` chart with:
+     - Dataset: points mapped to `{ x: date, y: value }`
+     - X-axis: `type: 'time'`, time unit auto-detected
+     - Tooltip: show date + value formatted
+     - Zoom: enabled on x-axis via drag
+4. Create `Dashboard` component:
+   - Layout: `QueryForm` at top, charts below in a grid
+   - Conditionally renders charts only when data is loaded
+
+### Dependencies to Add
+- `chartjs-plugin-zoom`, `chartjs-adapter-date-fns`, `date-fns` (npm, frontend)
+
+### Tests Needed
+- None (visual component)
+
+---
+
+## Item: Forecast overlay with confidence bands
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Overlay the recommended model's forecast on the same chart as the raw series
+- Forecast line in a different color (dashed)
+- Confidence interval as a shaded band (fill between `lower_ci` and `upper_ci`)
+- Legend showing "Actual" vs "Forecast (model_name)" vs "95% CI"
+- Model selector to switch between forecast models
+
+### Files to Create/Modify
+- `frontend/src/components/charts/ForecastChart.tsx` — combined series + forecast chart
+- `frontend/src/components/ModelSelector.tsx` — dropdown to pick which model's forecast to display
+
+### Implementation Steps
+1. Create `ForecastChart` component:
+   - Props: `series: TimeSeries`, `forecast: ForecastComparison`, `selectedModel: string`
+   - Dataset 1: raw series (solid blue line)
+   - Dataset 2: forecast values (dashed orange line)
+   - Dataset 3: upper CI (transparent line, used as fill boundary)
+   - Dataset 4: lower CI (with `fill: '-1'` to shade between lower and upper)
+   - Use Chart.js `fill` option for the confidence band
+2. Create `ModelSelector` component:
+   - Dropdown listing all model names from `forecast.forecasts`
+   - Badge showing recommended model
+   - Shows MAE score next to each model name (from evaluations)
+3. When user switches model, the chart re-renders with that model's forecast points
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (visual component)
+
+---
+
+## Item: Trend analysis panel
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Trend direction indicator: colored arrow or badge ("Rising", "Falling", "Stable") with momentum value
+- Seasonality status: detected/not-detected, period if detected
+- Anomaly count with severity indicator
+- Structural breaks listed with dates
+
+### Files to Create/Modify
+- `frontend/src/components/AnalysisPanel.tsx` — trend analysis display
+
+### Implementation Steps
+1. Create `AnalysisPanel` component:
+   - Props: `analysis: TrendAnalysis`
+   - Section 1: **Trend** — direction badge (green/red/gray for rising/falling/stable), momentum value, acceleration value
+   - Section 2: **Seasonality** — "Weekly pattern detected (strength: 0.7)" or "No seasonality detected"
+   - Section 3: **Anomalies** — count badge, list of anomaly dates/values if < 10, truncated with "and N more" otherwise
+   - Section 4: **Structural Breaks** — list of break dates with method labels
+2. Style with Tailwind cards, color-coded badges
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (visual component)
+
+---
+
+## Item: Model comparison table
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Table showing all model evaluations side by side
+- Columns: Model Name, MAE, RMSE, MAPE, Train Size, Test Size
+- Highlight the recommended model row
+- Sortable by any metric column (click column header)
+
+### Files to Create/Modify
+- `frontend/src/components/EvaluationTable.tsx` — comparison table
+
+### Implementation Steps
+1. Create `EvaluationTable` component:
+   - Props: `evaluations: ModelEvaluation[]`, `recommended: string`
+   - Render a `<table>` with sortable column headers
+   - Highlight recommended model row with a distinct background color
+   - Format numbers to 2 decimal places
+   - Click column header to sort ascending/descending
+2. Use Tailwind table utilities for clean styling
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (visual component)
+
+---
+
+## Item: AI commentary section (Phase 5 optional)
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Section that displays AI-generated commentary if Phase 5 is implemented
+- Connects to `/api/insight` SSE endpoint
+- Shows streaming text as it arrives
+- Falls back gracefully: if endpoint returns 503 (no API key) or doesn't exist, shows a "AI commentary not available" placeholder
+- Styled as a distinct card/panel
+
+### Files to Create/Modify
+- `frontend/src/components/InsightPanel.tsx` — AI commentary display
+
+### Implementation Steps
+1. Create `InsightPanel` component:
+   - Props: `source: string`, `query: string`, `horizon: number`, `enabled: boolean`
+   - On mount (when `enabled` is true): open `EventSource` to `/api/insight?source=...&query=...`
+   - Listen for `delta` events — append text chunks to display
+   - Listen for `complete` event — parse JSON, show structured insight
+   - Listen for `error` events — show error message
+   - If `EventSource` fails to connect (503, network error): show "AI commentary unavailable" placeholder
+2. `enabled` flag starts as `false`; after series/forecast load, check if `/api/insight` is reachable (HEAD request or try/catch on EventSource)
+3. Loading state: show typing indicator while streaming
+4. Render as a Tailwind card with prose-style text
+
+### Dependencies to Add
+- None (uses built-in `EventSource` API)
+
+### Tests Needed
+- None (visual component, Phase 5 dependent)
+
+---
+
+## Item: Responsive dashboard layout
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Desktop: 2-column grid (charts left, analysis/table right)
+- Tablet: single column, stacked
+- Mobile: single column, simplified
+- Header with TrendLab branding
+- Footer or attribution line
+
+### Files to Create/Modify
+- `frontend/src/App.tsx` — layout shell
+- `frontend/src/components/Dashboard.tsx` — grid layout composing all components
+
+### Implementation Steps
+1. Update `App.tsx`:
+   - Header bar: "TrendLab" title, simple branding
+   - Main content area: `<Dashboard />` component
+2. Create/update `Dashboard` layout:
+   - Top: `<QueryForm />`
+   - Grid:
+     - Left column (2/3 width on desktop): `<ForecastChart />`, `<EvaluationTable />`
+     - Right column (1/3 width): `<AnalysisPanel />`, `<InsightPanel />`
+   - On tablet/mobile: single column, all stacked
+3. Use Tailwind responsive utilities: `grid-cols-1 lg:grid-cols-3`, `lg:col-span-2`
+4. Add inter-component spacing with consistent Tailwind gap/margin
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (layout — tested manually)
+
+---
+
+## Item: FastAPI static file serving
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Mount `frontend/dist/` as static files in FastAPI
+- Serve `index.html` for all non-API routes (SPA catch-all)
+- Only mount if the `frontend/dist` directory exists (don't break the API if frontend isn't built)
+- API routes (`/api/*`, `/health`, `/`) take priority over static files
+
+### Files to Create/Modify
+- `app/main.py` — add static file mount
+
+### Implementation Steps
+1. Add to `app/main.py` after `app.include_router(...)`:
+   ```python
+   import os
+   from pathlib import Path
+   from fastapi.staticfiles import StaticFiles
+
+   frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+   if frontend_dist.is_dir():
+       app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+   ```
+2. The `html=True` option makes StaticFiles serve `index.html` for any path that doesn't match a file — enabling SPA client-side routing
+3. This mount goes LAST so API routes take priority
+4. Add `frontend/dist/` and `frontend/node_modules/` to `.gitignore`
+
+### Dependencies to Add
+- None (FastAPI `StaticFiles` is built-in via starlette)
+
+### Tests Needed
+- Test that `/api/sources` still works when static mount is active
+- Test that a non-API path returns 200 (serves index.html) when `frontend/dist` exists
+
+---
+
+## Item: Development workflow scripts
+**Status:** planned
+**Phase:** 6
+
+### Requirements
+- Simple way to run both frontend dev server and backend simultaneously
+- Build command for production
+
+### Files to Create/Modify
+- `frontend/package.json` — add scripts
+- Update CLAUDE.md with new commands
+
+### Implementation Steps
+1. In `frontend/package.json`, ensure scripts:
+   - `"dev"` — runs Vite dev server (default)
+   - `"build"` — runs Vite production build
+   - `"preview"` — runs Vite preview server
+2. Development workflow:
+   - Terminal 1: `uv run uvicorn app.main:app --reload` (backend)
+   - Terminal 2: `cd frontend && npm run dev` (frontend with API proxy)
+3. Production build: `cd frontend && npm run build` → then `uv run uvicorn app.main:app` serves everything
+4. Update CLAUDE.md commands section
+
+### Dependencies to Add
+- None
+
+### Tests Needed
+- None (workflow documentation)
+
+---
+
+## Phase 6 Execution Order
+
+1. Scaffold React + Vite + Tailwind project
+2. API client module and TypeScript types
+3. Source selector and query input component + `useApi` hook
+4. Time-series line chart (raw data)
+5. Forecast overlay with confidence bands + model selector
+6. Trend analysis panel
+7. Model comparison table
+8. AI commentary section (optional Phase 5 integration)
+9. Responsive dashboard layout (compose everything)
+10. FastAPI static file serving
+11. Development workflow scripts + CLAUDE.md update
+12. Manual QA: verify all views on desktop and tablet
+
+Items 6 and 7 are independent and can be developed in either order.
+Items 4 and 5 can be merged into a single chart component if preferred.
+
+---
+
+## Files Summary
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `frontend/` (entire directory) | React + Vite + Tailwind SPA |
+| `frontend/src/api/types.ts` | TypeScript interfaces matching Pydantic models |
+| `frontend/src/api/client.ts` | Fetch wrappers for all API endpoints |
+| `frontend/src/hooks/useApi.ts` | Custom hook managing API fetch state |
+| `frontend/src/components/QueryForm.tsx` | Source selector + query input + horizon |
+| `frontend/src/components/Dashboard.tsx` | Main dashboard layout grid |
+| `frontend/src/components/charts/SeriesChart.tsx` | Raw time-series line chart |
+| `frontend/src/components/charts/ForecastChart.tsx` | Series + forecast + CI bands |
+| `frontend/src/components/ModelSelector.tsx` | Dropdown to switch forecast models |
+| `frontend/src/components/AnalysisPanel.tsx` | Trend/seasonality/anomaly display |
+| `frontend/src/components/EvaluationTable.tsx` | Model comparison table |
+| `frontend/src/components/InsightPanel.tsx` | AI commentary (Phase 5 optional) |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| `app/main.py` | Mount `frontend/dist` as static files |
+| `.gitignore` | Add `frontend/dist/`, `frontend/node_modules/` |
+| `CLAUDE.md` | Add frontend dev commands |
+
+---
+
+## Key Design Decisions
+
+- **React + Vite + TypeScript** — modern toolchain, fast HMR, type safety. Vite proxies to FastAPI in dev
+- **Tailwind CSS** — utility-first, no custom CSS framework. Responsive breakpoints built in
+- **Chart.js via react-chartjs-2** — lightweight, well-documented, supports time axes, zoom, and fill between lines for CI bands
+- **Built output served by FastAPI** — single deployment unit. `StaticFiles(html=True)` handles SPA routing
+- **Phase 5 independent** — InsightPanel gracefully degrades if `/api/insight` is unavailable (503 or missing)
+- **No SSR needed** — pure client-side SPA. Data comes from the existing JSON API
+- **No Python test changes** — all frontend code is tested manually or via browser. Python tests remain backend-only
