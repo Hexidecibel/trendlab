@@ -25,6 +25,7 @@ from app.models.schemas import (
 )
 from app.services.aggregation import resample_series
 from app.services.cache import CachedFetcher
+from app.services.transforms import apply_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,10 @@ async def get_series(
     resample: str | None = Query(
         None, description="Resample frequency: week, month, quarter, season"
     ),
+    apply: str | None = Query(
+        None,
+        description="Pipe-delimited transforms, e.g. normalize|rolling_avg_7d",
+    ),
 ):
     """Fetch time-series data from a named source."""
     try:
@@ -90,6 +95,8 @@ async def get_series(
 
     if resample:
         ts = resample_series(ts, resample, method=adapter.aggregation_method)
+    if apply:
+        ts = apply_transforms(ts, apply)
     return ts
 
 
@@ -106,6 +113,10 @@ async def analyze_series(
     resample: str | None = Query(
         None, description="Resample frequency: week, month, quarter, season"
     ),
+    apply: str | None = Query(
+        None,
+        description="Pipe-delimited transforms, e.g. normalize|rolling_avg_7d",
+    ),
 ):
     """Fetch time-series data and run trend analysis."""
     try:
@@ -120,6 +131,8 @@ async def analyze_series(
 
     if resample:
         ts = resample_series(ts, resample, method=adapter.aggregation_method)
+    if apply:
+        ts = apply_transforms(ts, apply)
 
     try:
         return analyze(ts, anomaly_method=anomaly_method)
@@ -138,6 +151,10 @@ async def forecast_series(
     resample: str | None = Query(
         None, description="Resample frequency: week, month, quarter, season"
     ),
+    apply: str | None = Query(
+        None,
+        description="Pipe-delimited transforms, e.g. normalize|rolling_avg_7d",
+    ),
 ):
     """Fetch time-series data and run forecasting with multiple models."""
     try:
@@ -152,6 +169,8 @@ async def forecast_series(
 
     if resample:
         ts = resample_series(ts, resample, method=adapter.aggregation_method)
+    if apply:
+        ts = apply_transforms(ts, apply)
 
     try:
         return forecast(ts, horizon=horizon)
@@ -187,6 +206,8 @@ async def compare_series(request: CompareRequest):
             ts = resample_series(
                 ts, request.resample, method=adapter.aggregation_method
             )
+        if request.apply:
+            ts = apply_transforms(ts, request.apply)
 
         result_series.append(ts)
 
