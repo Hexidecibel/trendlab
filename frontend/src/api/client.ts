@@ -1,6 +1,7 @@
 import type {
   DataSourceInfo,
   ForecastComparison,
+  LookupItem,
   TimeSeries,
   TrendAnalysis,
 } from './types'
@@ -57,4 +58,19 @@ export async function fetchForecast(
 ): Promise<ForecastComparison> {
   const qs = buildParams({ source, query, horizon, start, end })
   return fetchJson(`/api/forecast?${qs}`)
+}
+
+export async function fetchLookup(
+  source: string,
+  lookupType: string,
+  league?: string,
+  season?: string,
+): Promise<LookupItem[]> {
+  const qs = buildParams({
+    source,
+    lookup_type: lookupType,
+    league,
+    season,
+  })
+  return fetchJson(`/api/lookup?${qs}`)
 }

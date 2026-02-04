@@ -4,7 +4,7 @@ from collections import defaultdict
 import httpx
 
 from app.data.base import DataAdapter
-from app.models.schemas import DataPoint, TimeSeries
+from app.models.schemas import DataPoint, FormField, TimeSeries
 
 PYPI_STATS_URL = "https://pypistats.org/api/packages/{package}/overall"
 
@@ -12,6 +12,16 @@ PYPI_STATS_URL = "https://pypistats.org/api/packages/{package}/overall"
 class PyPIAdapter(DataAdapter):
     name = "pypi"
     description = "PyPI package download counts (last 180 days)"
+
+    def form_fields(self) -> list[FormField]:
+        return [
+            FormField(
+                name="query",
+                label="Package Name",
+                field_type="text",
+                placeholder="fastapi",
+            )
+        ]
 
     async def fetch(
         self,

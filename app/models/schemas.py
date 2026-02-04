@@ -27,9 +27,29 @@ class TimeSeries(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class FormFieldOption(BaseModel):
+    value: str
+    label: str
+
+
+class FormField(BaseModel):
+    name: str
+    label: str
+    field_type: str  # "text", "select", "autocomplete"
+    placeholder: str = ""
+    options: list[FormFieldOption] = Field(default_factory=list)
+    depends_on: str | None = None  # field name this depends on
+
+
 class DataSourceInfo(BaseModel):
     name: str
     description: str
+    form_fields: list[FormField] = Field(default_factory=list)
+
+
+class LookupItem(BaseModel):
+    value: str
+    label: str
 
 
 # --- Phase 3: Analysis models ---

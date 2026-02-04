@@ -5,7 +5,7 @@ import datetime
 import httpx
 
 from app.data.base import DataAdapter
-from app.models.schemas import DataPoint, TimeSeries
+from app.models.schemas import DataPoint, FormField, TimeSeries
 
 FOOTBALL_API_URL = "https://api.football-data.org/v4/competitions/{competition}/matches"
 
@@ -16,6 +16,16 @@ class FootballDataAdapter(DataAdapter):
 
     def __init__(self, token: str) -> None:
         self._token = token
+
+    def form_fields(self) -> list[FormField]:
+        return [
+            FormField(
+                name="query",
+                label="Competition/Team ID",
+                field_type="text",
+                placeholder="PL/66",
+            )
+        ]
 
     async def fetch(
         self,

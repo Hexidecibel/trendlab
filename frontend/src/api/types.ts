@@ -10,9 +10,29 @@ export interface TimeSeries {
   metadata: Record<string, unknown>
 }
 
+export interface FormFieldOption {
+  value: string
+  label: string
+}
+
+export interface FormField {
+  name: string
+  label: string
+  field_type: 'text' | 'select' | 'autocomplete'
+  placeholder: string
+  options: FormFieldOption[]
+  depends_on: string | null
+}
+
 export interface DataSourceInfo {
   name: string
   description: string
+  form_fields: FormField[]
+}
+
+export interface LookupItem {
+  value: string
+  label: string
 }
 
 export interface MovingAverage {

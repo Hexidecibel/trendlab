@@ -13,4 +13,8 @@ async def test_health(client: AsyncClient):
 async def test_root(client: AsyncClient):
     response = await client.get("/")
     assert response.status_code == 200
-    assert "message" in response.json()
+    # Returns SPA HTML if frontend is built, JSON otherwise
+    if response.headers.get("content-type", "").startswith("text/html"):
+        assert "<!doctype html>" in response.text.lower()
+    else:
+        assert "message" in response.json()

@@ -13,6 +13,7 @@ export function InsightPanel({ source, query, horizon }: Props) {
   >('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const eventSourceRef = useRef<EventSource | null>(null)
+  const gotDataRef = useRef(false)
 
   useEffect(() => {
     // Close any previous connection
@@ -20,6 +21,7 @@ export function InsightPanel({ source, query, horizon }: Props) {
     setText('')
     setStatus('loading')
     setErrorMsg('')
+    gotDataRef.current = false
 
     const params = new URLSearchParams({
       source,
@@ -30,6 +32,7 @@ export function InsightPanel({ source, query, horizon }: Props) {
     eventSourceRef.current = es
 
     es.addEventListener('delta', (e) => {
+      gotDataRef.current = true
       setStatus('streaming')
       setText((prev) => prev + JSON.parse(e.data))
     })
@@ -49,14 +52,13 @@ export function InsightPanel({ source, query, horizon }: Props) {
 
     es.onerror = () => {
       // Connection failed entirely (503, network error, etc.)
-      if (status === 'loading') {
+      if (!gotDataRef.current) {
         setStatus('unavailable')
       }
       es.close()
     }
 
     return () => es.close()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, query, horizon])
 
   if (status === 'unavailable') {

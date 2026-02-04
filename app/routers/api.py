@@ -13,6 +13,7 @@ from app.forecasting.engine import forecast
 from app.models.schemas import (
     DataSourceInfo,
     ForecastComparison,
+    LookupItem,
     TimeSeries,
     TrendAnalysis,
 )
@@ -32,6 +33,28 @@ async def api_root():
 async def list_sources():
     """List all available data sources."""
     return registry.list_sources()
+
+
+@router.get("/lookup", response_model=list[LookupItem])
+async def lookup(
+    source: str = Query(..., description="Data source name"),
+    lookup_type: str = Query(..., description="Lookup type (e.g. teams, players)"),
+    league: str = Query("", description="League filter"),
+    season: str = Query("", description="Season filter"),
+):
+    """Return lookup items for autocomplete fields."""
+    try:
+        adapter = registry.get(source)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+
+    kwargs: dict[str, str] = {}
+    if league:
+        kwargs["league"] = league
+    if season:
+        kwargs["season"] = season
+
+    return await adapter.lookup(lookup_type, **kwargs)
 
 
 @router.get("/series", response_model=TimeSeries)

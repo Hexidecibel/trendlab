@@ -124,6 +124,7 @@
 - [ ] Write a `Dockerfile` and `docker-compose.yml` for one-command deployment
 - [ ] Add CI pipeline config (GitHub Actions): lint, test, type-check on every push
 - [ ] Add OpenAPI schema customization — clean descriptions for all endpoints
+- [ ] Add query autocomplete/lookup for adapters — e.g. football adapter needs a `/api/lookup?source=football` endpoint that returns available competitions and team IDs with names, so users don't need to know numeric IDs. Could also add placeholder hints per source in the frontend QueryForm.
 - [ ] Final README with architecture diagram, screenshots, and setup instructions
 
 **You'll have:** A deployable, documented project that demonstrates real engineering — not just code, but system thinking.
@@ -138,6 +139,9 @@
 - [ ] More adapters: Spotify, npm, Reddit, crypto exchanges
 - [ ] Export reports as PDF
 - [ ] Plugin system for community-contributed adapters
+- [ ] Natural language trend analyzer — describe a team/player/stat in plain English, AI builds the query and analysis automatically
+- [ ] Migrate frontend to MUI (Material UI) for richer UI components (data grids, autocomplete, dialogs)
+- [ ] Add player-level queries to ASA adapter (xgoals, goals-added, xpass per player per game)
 
 ---
 

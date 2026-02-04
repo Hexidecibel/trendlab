@@ -1,0 +1,280 @@
+"""Tests for the American Soccer Analysis adapter."""
+
+import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.data.adapters.asa import ASAAdapter
+
+MOCK_TEAMS = [
+    {
+        "team_id": "jYQJ19EqGR",
+        "team_name": "Seattle Sounders FC",
+        "team_short_name": "Seattle",
+        "team_abbreviation": "SEA",
+    },
+    {
+        "team_id": "kaDQ0wRqEv",
+        "team_name": "LA Galaxy",
+        "team_short_name": "LA Galaxy",
+        "team_abbreviation": "LAG",
+    },
+]
+
+MOCK_GAMES = [
+    {
+        "game_id": "game1",
+        "date_time_utc": "2024-03-01 00:00:00 UTC",
+        "home_team_id": "jYQJ19EqGR",
+        "away_team_id": "kaDQ0wRqEv",
+        "home_score": 2,
+        "away_score": 1,
+        "season_name": "2024",
+        "status": "FullTime",
+    },
+    {
+        "game_id": "game2",
+        "date_time_utc": "2024-03-15 00:00:00 UTC",
+        "home_team_id": "kaDQ0wRqEv",
+        "away_team_id": "jYQJ19EqGR",
+        "home_score": 0,
+        "away_score": 3,
+        "season_name": "2024",
+        "status": "FullTime",
+    },
+    {
+        "game_id": "game3",
+        "date_time_utc": "2024-04-01 00:00:00 UTC",
+        "home_team_id": "jYQJ19EqGR",
+        "away_team_id": "other",
+        "home_score": 1,
+        "away_score": 1,
+        "season_name": "2024",
+        "status": "FullTime",
+    },
+]
+
+MOCK_XGOALS = [
+    {
+        "team_id": "jYQJ19EqGR",
+        "game_id": "game1",
+        "goals_for": 2,
+        "goals_against": 1,
+        "xgoals_for": 1.5,
+        "xgoals_against": 0.8,
+        "xgoal_difference": 0.7,
+        "shots_for": 12,
+        "shots_against": 8,
+        "points": 3,
+        "xpoints": 2.1,
+    },
+    {
+        "team_id": "jYQJ19EqGR",
+        "game_id": "game2",
+        "goals_for": 3,
+        "goals_against": 0,
+        "xgoals_for": 2.2,
+        "xgoals_against": 0.5,
+        "xgoal_difference": 1.7,
+        "shots_for": 15,
+        "shots_against": 5,
+        "points": 3,
+        "xpoints": 2.5,
+    },
+    {
+        "team_id": "jYQJ19EqGR",
+        "game_id": "game3",
+        "goals_for": 1,
+        "goals_against": 1,
+        "xgoals_for": 1.1,
+        "xgoals_against": 1.0,
+        "xgoal_difference": 0.1,
+        "shots_for": 10,
+        "shots_against": 10,
+        "points": 1,
+        "xpoints": 1.5,
+    },
+]
+
+MOCK_XPASS = [
+    {
+        "team_id": "jYQJ19EqGR",
+        "game_id": "game1",
+        "attempted_passes_for": 500,
+        "pass_completion_percentage_for": 0.85,
+        "xpass_completion_percentage_for": 0.83,
+        "passes_completed_over_expected_for": 10.0,
+        "passes_completed_over_expected_p100_for": 2.0,
+    },
+]
+
+
+def _mock_response(json_data, status_code=200):
+    mock = MagicMock()
+    mock.status_code = status_code
+    mock.json.return_value = json_data
+    mock.raise_for_status = MagicMock()
+    if status_code >= 400:
+        import httpx
+
+        mock.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "error", request=MagicMock(), response=mock
+        )
+    return mock
+
+
+@pytest.fixture
+def adapter():
+    return ASAAdapter()
+
+
+class TestASAAdapter:
+    def test_adapter_metadata(self, adapter):
+        assert adapter.name == "asa"
+        assert "soccer" in adapter.description.lower() or "MLS" in adapter.description
+
+    def test_form_fields(self, adapter):
+        fields = adapter.form_fields()
+        names = [f.name for f in fields]
+        assert "league" in names
+        assert "entity_type" in names
+        assert "metric" in names
+        assert "entity" in names
+
+    @pytest.mark.asyncio
+    async def test_lookup_teams(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get.return_value = _mock_response(MOCK_TEAMS)
+
+            items = await adapter.lookup("teams", league="mls")
+            assert len(items) == 2
+            assert items[0].label == "Seattle Sounders FC"
+            assert items[0].value == "jYQJ19EqGR"
+
+    @pytest.mark.asyncio
+    async def test_fetch_xgoals_for(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            # First call: games, second call: xgoals
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:xgoals_for")
+            assert ts.source == "asa"
+            assert len(ts.points) == 3
+            assert ts.points[0].date == datetime.date(2024, 3, 1)
+            assert ts.points[0].value == 1.5  # xgoals_for from game1
+
+    @pytest.mark.asyncio
+    async def test_fetch_goals_for(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
+            assert len(ts.points) == 3
+            assert ts.points[0].value == 2  # goals_for from game1
+
+    @pytest.mark.asyncio
+    async def test_fetch_xpass(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XPASS),
+            ]
+
+            ts = await adapter.fetch(
+                "mls:teams:jYQJ19EqGR:pass_completion_percentage_for"
+            )
+            assert len(ts.points) == 1
+            assert ts.points[0].value == 0.85
+
+    @pytest.mark.asyncio
+    async def test_fetch_date_filtering(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch(
+                "mls:teams:jYQJ19EqGR:xgoals_for",
+                start=datetime.date(2024, 3, 10),
+            )
+            assert len(ts.points) == 2  # game2 and game3
+
+    @pytest.mark.asyncio
+    async def test_fetch_invalid_query_format(self, adapter):
+        with pytest.raises(ValueError, match="Invalid query format"):
+            await adapter.fetch("bad_query")
+
+    @pytest.mark.asyncio
+    async def test_fetch_invalid_metric(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            with pytest.raises(ValueError, match="Unknown metric"):
+                await adapter.fetch("mls:teams:jYQJ19EqGR:nonexistent_metric")
+
+    @pytest.mark.asyncio
+    async def test_metadata_includes_team_and_metric(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:xgoals_for")
+            assert ts.metadata["metric"] == "xgoals_for"
+            assert ts.metadata["league"] == "mls"
+            assert ts.metadata["entity_type"] == "teams"
+
+    @pytest.mark.asyncio
+    async def test_points_sorted_by_date(self, adapter):
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
+            dates = [p.date for p in ts.points]
+            assert dates == sorted(dates)

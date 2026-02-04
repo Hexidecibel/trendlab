@@ -3,7 +3,7 @@ import datetime
 import httpx
 
 from app.data.base import DataAdapter
-from app.models.schemas import DataPoint, TimeSeries
+from app.models.schemas import DataPoint, FormField, TimeSeries
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
 
@@ -11,6 +11,16 @@ COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
 class CoinGeckoAdapter(DataAdapter):
     name = "crypto"
     description = "Cryptocurrency price history (USD, last 180 days)"
+
+    def form_fields(self) -> list[FormField]:
+        return [
+            FormField(
+                name="query",
+                label="Coin ID",
+                field_type="text",
+                placeholder="bitcoin",
+            )
+        ]
 
     async def fetch(
         self,

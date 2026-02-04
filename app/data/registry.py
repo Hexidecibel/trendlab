@@ -14,7 +14,11 @@ class AdapterRegistry:
 
     def list_sources(self) -> list[DataSourceInfo]:
         return [
-            DataSourceInfo(name=a.name, description=a.description)
+            DataSourceInfo(
+                name=a.name,
+                description=a.description,
+                form_fields=a.form_fields(),
+            )
             for a in self._adapters.values()
         ]
 

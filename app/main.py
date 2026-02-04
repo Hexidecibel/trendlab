@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.data.adapters.asa import ASAAdapter
 from app.data.adapters.coingecko import CoinGeckoAdapter
 from app.data.adapters.pypi import PyPIAdapter
 from app.data.registry import registry
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 registry.register(PyPIAdapter())
 registry.register(CoinGeckoAdapter())
+registry.register(ASAAdapter())
 
 if settings.github_token:
     from app.data.adapters.github import GitHubStarsAdapter
@@ -58,12 +60,6 @@ async def health_check():
     return {"status": "ok"}
 
 
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {"message": "Welcome to trendlab"}
-
-
 # Serve frontend static files (must be LAST so API routes take priority)
 frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if frontend_dist.is_dir():
@@ -72,3 +68,9 @@ if frontend_dist.is_dir():
         StaticFiles(directory=str(frontend_dist), html=True),
         name="frontend",
     )
+else:
+
+    @app.get("/")
+    async def root():
+        """Root endpoint (when frontend is not built)."""
+        return {"message": "Welcome to trendlab"}
