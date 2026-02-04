@@ -7,7 +7,7 @@
 ## Tier 1: Data Foundation
 
 ### Item 1: SQLite Persistence
-**Status:** planned
+**Status:** done
 **Tier:** 1 — Data Foundation
 
 #### Requirements
@@ -93,7 +93,7 @@ Note: Complex nested models (TrendAnalysis, ForecastComparison) serialize to JSO
 ---
 
 ### Item 2: Caching Layer
-**Status:** planned
+**Status:** done
 **Tier:** 1 — Data Foundation
 
 #### Requirements
@@ -148,7 +148,7 @@ Request → cached_fetch(source, query, start, end)
 ---
 
 ### Item 3: Time-Based Aggregation
-**Status:** planned
+**Status:** done
 **Tier:** 1 — Data Foundation
 
 #### Requirements

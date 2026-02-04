@@ -8,9 +8,9 @@
 
 Everything else builds on this.
 
-- [planned] Add SQLite persistence — store raw series, analysis results, forecasts, and query configs; foundation for caching, shareable URLs, and saved views
-- [planned] Implement a caching layer — TTL-based cache on top of persistence so repeated queries don't hit external APIs
-- [planned] Time-based aggregation: optional `resample` param (week/month/season) on API endpoints, centralized utility in data layer, adapter-agnostic
+- [x] Add SQLite persistence — store raw series, analysis results, forecasts, and query configs; foundation for caching, shareable URLs, and saved views
+- [x] Implement a caching layer — TTL-based cache on top of persistence so repeated queries don't hit external APIs
+- [x] Time-based aggregation: optional `resample` param (week/month/season) on API endpoints, centralized utility in data layer, adapter-agnostic
 
 ---
 
