@@ -81,6 +81,27 @@ def make_step_series(
     return TimeSeries(source="test", query="step", points=points)
 
 
+def make_trending_series_with_noise(
+    n: int = 60,
+    slope: float = 1.0,
+    intercept: float = 100.0,
+    noise_std: float = 5.0,
+    seed: int = 42,
+    start_date: datetime.date = BASE_DATE,
+) -> TimeSeries:
+    """Create a linear trend with Gaussian noise for forecast testing."""
+    rng = __import__("numpy").random.default_rng(seed)
+    noise = rng.normal(0, noise_std, n)
+    points = [
+        DataPoint(
+            date=start_date + datetime.timedelta(days=i),
+            value=intercept + slope * i + noise[i],
+        )
+        for i in range(n)
+    ]
+    return TimeSeries(source="test", query="noisy_trend", points=points)
+
+
 def make_series_with_outliers(
     n: int = 60,
     base_value: float = 100.0,
