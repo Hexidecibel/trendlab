@@ -2,14 +2,16 @@
 name = "trendlab"
 version = "0.1.0"
 description = "A python and fast API ai trend building lab. Connect data sources to real world data sets and start visualizing"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.9.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
-    "numpy>=2.4.2",
+    "numpy>=1.26.0",
+    "statsforecast>=2.0.0",
+    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +24,7 @@ dev = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
