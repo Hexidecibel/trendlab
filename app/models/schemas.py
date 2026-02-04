@@ -85,3 +85,55 @@ class TrendAnalysis(BaseModel):
     seasonality: SeasonalityResult
     anomalies: AnomalyReport
     structural_breaks: list[StructuralBreak]
+
+
+# --- Phase 4: Forecasting models ---
+
+
+class ForecastPoint(BaseModel):
+    date: datetime.date
+    value: float
+    lower_ci: float
+    upper_ci: float
+
+
+class ModelForecast(BaseModel):
+    model_name: str
+    points: list[ForecastPoint]
+
+
+class ModelEvaluation(BaseModel):
+    model_name: str
+    mae: float
+    rmse: float
+    mape: float
+    train_size: int
+    test_size: int
+
+
+class ForecastComparison(BaseModel):
+    source: str
+    query: str
+    series_length: int
+    horizon: int
+    forecasts: list[ModelForecast]
+    evaluations: list[ModelEvaluation]
+    recommended_model: str
+
+
+# --- Phase 5: AI Commentary models ---
+
+
+class RiskFlag(BaseModel):
+    label: str
+    description: str
+
+
+class InsightReport(BaseModel):
+    source: str
+    query: str
+    summary: str
+    risk_flags: list[RiskFlag]
+    recommended_action: str | None
+    prompt_version: str
+    model_used: str
