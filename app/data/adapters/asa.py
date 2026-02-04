@@ -111,6 +111,26 @@ class ASAAdapter(DataAdapter):
                     for m in ALL_METRICS
                 ],
             ),
+            FormField(
+                name="home_away",
+                label="Venue",
+                field_type="select",
+                options=[
+                    FormFieldOption(value="all", label="All Games"),
+                    FormFieldOption(value="home", label="Home Only"),
+                    FormFieldOption(value="away", label="Away Only"),
+                ],
+            ),
+            FormField(
+                name="stage",
+                label="Stage",
+                field_type="select",
+                options=[
+                    FormFieldOption(value="all", label="All Stages"),
+                    FormFieldOption(value="regular", label="Regular Season"),
+                    FormFieldOption(value="playoffs", label="Playoffs"),
+                ],
+            ),
         ]
 
     async def lookup(self, lookup_type: str, **kwargs: str) -> list[LookupItem]:
@@ -139,14 +159,16 @@ class ASAAdapter(DataAdapter):
         end: datetime.date | None = None,
     ) -> TimeSeries:
         parts = query.split(":")
-        if len(parts) != 4:
+        if len(parts) < 4 or len(parts) > 6:
             raise ValueError(
                 f"Invalid query format: '{query}'. "
-                "Expected 'league:entity_type:entity_id:metric' "
+                "Expected 'league:entity_type:entity_id:metric[:home_away:stage]' "
                 "(e.g. 'mls:teams:jYQJ19EqGR:xgoals_for')"
             )
 
-        league, entity_type, entity_id, metric = parts
+        league, entity_type, entity_id, metric = parts[:4]
+        home_away = parts[4] if len(parts) > 4 else "all"
+        stage = parts[5] if len(parts) > 5 else "all"
 
         if metric not in METRIC_ENDPOINT:
             raise ValueError(
@@ -155,8 +177,10 @@ class ASAAdapter(DataAdapter):
 
         endpoint_category = METRIC_ENDPOINT[metric]
 
-        # Fetch games to get date mapping
-        game_dates = await self._fetch_game_dates(league, entity_type, entity_id)
+        # Fetch games to get date mapping (with venue/stage filtering)
+        game_dates = await self._fetch_game_dates(
+            league, entity_type, entity_id, home_away=home_away, stage=stage
+        )
 
         # Fetch metric data
         metric_data = await self._fetch_metric_data(
@@ -191,13 +215,24 @@ class ASAAdapter(DataAdapter):
                 "entity_id": entity_id,
                 "metric": metric,
                 "metric_label": METRIC_LABELS.get(metric, metric),
+                "home_away": home_away,
+                "stage": stage,
             },
         )
 
     async def _fetch_game_dates(
-        self, league: str, entity_type: str, entity_id: str
+        self,
+        league: str,
+        entity_type: str,
+        entity_id: str,
+        *,
+        home_away: str = "all",
+        stage: str = "all",
     ) -> dict[str, datetime.date]:
-        """Fetch games and return a mapping of game_id -> date."""
+        """Fetch games and return a mapping of game_id -> date.
+
+        Filters games by venue (home/away) and stage (regular/playoffs).
+        """
         url = f"{ASA_API_URL}/{league}/games"
         params: dict[str, str] = {}
         if entity_type == "teams":
@@ -211,6 +246,19 @@ class ASAAdapter(DataAdapter):
         date_map: dict[str, datetime.date] = {}
         for game in games:
             game_id = game["game_id"]
+
+            # Filter by home/away venue
+            if home_away == "home" and game.get("home_team_id") != entity_id:
+                continue
+            if home_away == "away" and game.get("away_team_id") != entity_id:
+                continue
+
+            # Filter by stage (knockout_game flag from ASA API)
+            if stage == "playoffs" and not game.get("knockout_game", False):
+                continue
+            if stage == "regular" and game.get("knockout_game", False):
+                continue
+
             dt_str = game["date_time_utc"]
             # Format: "2024-03-01 00:00:00 UTC"
             dt = datetime.datetime.strptime(

@@ -32,6 +32,7 @@ MOCK_GAMES = [
         "away_score": 1,
         "season_name": "2024",
         "status": "FullTime",
+        "knockout_game": False,
     },
     {
         "game_id": "game2",
@@ -42,6 +43,7 @@ MOCK_GAMES = [
         "away_score": 3,
         "season_name": "2024",
         "status": "FullTime",
+        "knockout_game": False,
     },
     {
         "game_id": "game3",
@@ -52,6 +54,7 @@ MOCK_GAMES = [
         "away_score": 1,
         "season_name": "2024",
         "status": "FullTime",
+        "knockout_game": True,
     },
 ]
 
@@ -278,3 +281,139 @@ class TestASAAdapter:
             ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
             dates = [p.date for p in ts.points]
             assert dates == sorted(dates)
+
+    @pytest.mark.asyncio
+    async def test_fetch_home_only(self, adapter):
+        """Home filter should only include games where the team is home."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            # game1 and game3 are home for jYQJ19EqGR, game2 is away
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:home:all")
+            assert len(ts.points) == 2
+            assert ts.points[0].value == 2  # game1
+            assert ts.points[1].value == 1  # game3
+
+    @pytest.mark.asyncio
+    async def test_fetch_away_only(self, adapter):
+        """Away filter should only include games where the team is away."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            # game2 is away for jYQJ19EqGR
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:away:all")
+            assert len(ts.points) == 1
+            assert ts.points[0].value == 3  # game2
+
+    @pytest.mark.asyncio
+    async def test_fetch_playoffs_only(self, adapter):
+        """Playoffs filter should only include knockout games."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            # Only game3 has knockout_game=True
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:all:playoffs")
+            assert len(ts.points) == 1
+            assert ts.points[0].date == datetime.date(2024, 4, 1)
+
+    @pytest.mark.asyncio
+    async def test_fetch_regular_season_only(self, adapter):
+        """Regular season filter should exclude knockout games."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            # game1 and game2 have knockout_game=False
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:all:regular")
+            assert len(ts.points) == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_home_playoffs_combined(self, adapter):
+        """Combined venue + stage filter."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            # Only game3: home + knockout
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:home:playoffs")
+            assert len(ts.points) == 1
+            assert ts.points[0].value == 1  # game3
+
+    @pytest.mark.asyncio
+    async def test_metadata_includes_filters(self, adapter):
+        """Metadata should include home_away and stage filters."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:home:regular")
+            assert ts.metadata["home_away"] == "home"
+            assert ts.metadata["stage"] == "regular"
+
+    @pytest.mark.asyncio
+    async def test_fetch_defaults_filters_when_omitted(self, adapter):
+        """4-part query should default home_away=all and stage=all."""
+        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            mock_client.get.side_effect = [
+                _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+            ]
+
+            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
+            assert ts.metadata["home_away"] == "all"
+            assert ts.metadata["stage"] == "all"
+            assert len(ts.points) == 3  # all games included
+
+    def test_form_fields_include_filters(self, adapter):
+        """Form fields should include home_away and stage selectors."""
+        fields = adapter.form_fields()
+        names = [f.name for f in fields]
+        assert "home_away" in names
+        assert "stage" in names
+        home_away = next(f for f in fields if f.name == "home_away")
+        assert len(home_away.options) == 3
+        stage = next(f for f in fields if f.name == "stage")
+        assert len(stage.options) == 3
