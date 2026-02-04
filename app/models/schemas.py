@@ -157,3 +157,24 @@ class InsightReport(BaseModel):
     recommended_action: str | None
     prompt_version: str
     model_used: str
+
+
+# --- Natural Language Query models ---
+
+
+class NaturalQueryRequest(BaseModel):
+    text: str = Field(..., min_length=3, max_length=500)
+
+
+class NaturalQueryResponse(BaseModel):
+    source: str
+    query: str
+    horizon: int = 14
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    interpretation: str
+
+
+class NaturalQueryError(BaseModel):
+    error: str
+    suggestions: list[str] = Field(default_factory=list)

@@ -2,6 +2,7 @@ import type {
   DataSourceInfo,
   ForecastComparison,
   LookupItem,
+  NaturalQueryResponse,
   TimeSeries,
   TrendAnalysis,
 } from './types'
@@ -73,4 +74,19 @@ export async function fetchLookup(
     season,
   })
   return fetchJson(`/api/lookup?${qs}`)
+}
+
+export async function parseNaturalQuery(
+  text: string,
+): Promise<NaturalQueryResponse> {
+  const response = await fetch('/api/natural-query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }))
+    throw detail
+  }
+  return response.json()
 }

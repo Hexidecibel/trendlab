@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useApi } from '../hooks/useApi'
+import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
 import { ForecastChart } from './charts/ForecastChart'
 import { ModelSelector } from './ModelSelector'
@@ -27,6 +28,17 @@ export function Dashboard() {
 
   return (
     <div>
+      <NaturalQueryInput loading={loading} onResult={handleSubmit} />
+
+      <div className="relative my-6">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-gray-200" />
+        </div>
+        <div className="relative flex justify-center text-sm">
+          <span className="bg-white px-3 text-gray-400">or use the form</span>
+        </div>
+      </div>
+
       <QueryForm
         sources={sources}
         loading={loading}

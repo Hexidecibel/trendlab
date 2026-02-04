@@ -117,3 +117,19 @@ export interface ForecastComparison {
   evaluations: ModelEvaluation[]
   recommended_model: string
 }
+
+export interface NaturalQueryResponse {
+  source: string
+  query: string
+  horizon: number
+  start: string | null
+  end: string | null
+  interpretation: string
+}
+
+export interface NaturalQueryError {
+  detail: {
+    error: string
+    suggestions: string[]
+  }
+}

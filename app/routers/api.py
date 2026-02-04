@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from app.ai.query_parser import parse_and_resolve
 from app.ai.summarizer import summarize_stream
 from app.analysis.engine import analyze
 from app.config import settings
@@ -14,6 +15,9 @@ from app.models.schemas import (
     DataSourceInfo,
     ForecastComparison,
     LookupItem,
+    NaturalQueryError,
+    NaturalQueryRequest,
+    NaturalQueryResponse,
     TimeSeries,
     TrendAnalysis,
 )
@@ -181,3 +185,26 @@ async def insight_stream(
             yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/natural-query", response_model=NaturalQueryResponse)
+async def natural_query(request: NaturalQueryRequest):
+    """Parse natural language into structured query parameters."""
+    if not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY not configured",
+        )
+
+    result = await parse_and_resolve(request.text)
+
+    if isinstance(result, NaturalQueryError):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": result.error,
+                "suggestions": result.suggestions,
+            },
+        )
+
+    return result

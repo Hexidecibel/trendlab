@@ -25,12 +25,13 @@
 
 ## Stretch Goals (Post-v1)
 
+- [ ] Enhance current adapters — ASA allows advanced config of querying; determine if other adapters (PyPI, crypto, football-data) could benefit from similar configurable fields
 - [ ] Multi-tenant support — user accounts with personal watchlists
 - [ ] LLM vs statistical forecast comparison — track where each method fails
 - [ ] Webhook/Slack notifications when a watched trend crosses a threshold
 - [ ] More adapters: Spotify, npm, Reddit, crypto exchanges
 - [ ] Export reports as PDF
 - [ ] Plugin system for community-contributed adapters
-- [ ] Natural language trend analyzer — describe a team/player/stat in plain English, AI builds the query and analysis automatically
-- [ ] Migrate frontend to MUI (Material UI) for richer UI components (data grids, autocomplete, dialogs)
+- [x] Natural language trend analyzer — describe a team/player/stat in plain English, AI builds the query and analysis automatically
+- [ ] Frontend redesign — migrate to MUI (Material UI), better theme, better structuring/layout of data (currently functional but dense with a lot of information on screen)
 - [ ] Add player-level queries to ASA adapter (xgoals, goals-added, xpass per player per game)
