@@ -5,13 +5,16 @@ import { fetchLookup } from '../api/client'
 interface Props {
   sources: DataSourceInfo[]
   loading: boolean
-  onSubmit: (source: string, query: string, horizon: number) => void
+  onSubmit: (source: string, query: string, horizon: number, start?: string, end?: string) => void
 }
 
 export function QueryForm({ sources, loading, onSubmit }: Props) {
   const [source, setSource] = useState('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [horizon, setHorizon] = useState(14)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [showDateRange, setShowDateRange] = useState(false)
   const [lookupCache, setLookupCache] = useState<
     Record<string, LookupItem[]>
   >({})
@@ -89,7 +92,7 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
     e.preventDefault()
     const query = buildQuery()
     if (source && query) {
-      onSubmit(source, query, horizon)
+      onSubmit(source, query, horizon, startDate || undefined, endDate || undefined)
     }
   }
 
@@ -183,6 +186,17 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
           </div>
         )}
 
+        {/* Date range toggle */}
+        {source && (
+          <button
+            type="button"
+            onClick={() => setShowDateRange(!showDateRange)}
+            className="text-xs text-blue-600 hover:text-blue-800 underline self-center pb-1"
+          >
+            {showDateRange ? 'Hide dates' : 'Date range'}
+          </button>
+        )}
+
         {/* Submit */}
         {source && (
           <button
@@ -194,6 +208,43 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
           </button>
         )}
       </div>
+
+      {/* Date range row */}
+      {showDateRange && source && (
+        <div className="flex gap-3 mt-3 pt-3 border-t border-gray-100">
+          <div className="w-40">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Start Date
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+            />
+          </div>
+          <div className="w-40">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              End Date
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+            />
+          </div>
+          {(startDate || endDate) && (
+            <button
+              type="button"
+              onClick={() => { setStartDate(''); setEndDate('') }}
+              className="text-xs text-gray-400 hover:text-gray-600 self-end pb-2"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
     </form>
   )
 }

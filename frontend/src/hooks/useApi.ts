@@ -27,7 +27,7 @@ export function useApi() {
   }, [])
 
   const loadData = useCallback(
-    async (source: string, query: string, horizon: number) => {
+    async (source: string, query: string, horizon: number, start?: string, end?: string) => {
       setLoading(true)
       setError(null)
       setSeries(null)
@@ -36,9 +36,9 @@ export function useApi() {
 
       try {
         const [s, a, f] = await Promise.all([
-          fetchSeries(source, query),
-          fetchAnalysis(source, query),
-          fetchForecast(source, query, horizon),
+          fetchSeries(source, query, start, end),
+          fetchAnalysis(source, query, start, end),
+          fetchForecast(source, query, horizon, start, end),
         ])
         setSeries(s)
         setAnalysis(a)

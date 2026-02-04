@@ -13,10 +13,10 @@ export function Dashboard() {
   const [selectedModel, setSelectedModel] = useState('')
   const [lastQuery, setLastQuery] = useState({ source: '', query: '', horizon: 14 })
 
-  const handleSubmit = (source: string, query: string, horizon: number) => {
+  const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string) => {
     setLastQuery({ source, query, horizon })
     setSelectedModel('')
-    loadData(source, query, horizon)
+    loadData(source, query, horizon, start, end)
   }
 
   // Auto-select recommended model when forecast loads
