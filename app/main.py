@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -10,6 +11,7 @@ from app.data.adapters.asa import ASAAdapter
 from app.data.adapters.coingecko import CoinGeckoAdapter
 from app.data.adapters.pypi import PyPIAdapter
 from app.data.registry import registry
+from app.db.engine import init_db
 from app.routers import api
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,15 @@ else:
         "FOOTBALL_DATA_TOKEN not set — football adapter will not be available"
     )
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="trendlab",
     description=(
         "AI trend building lab. Connect data sources"

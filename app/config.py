@@ -10,6 +10,9 @@ class Settings:
         self.github_token: str | None = os.environ.get("GITHUB_TOKEN")
         self.football_data_token: str | None = os.environ.get("FOOTBALL_DATA_TOKEN")
         self.anthropic_api_key: str | None = os.environ.get("ANTHROPIC_API_KEY")
+        self.database_url: str = os.environ.get(
+            "DATABASE_URL", "sqlite+aiosqlite:///./trendlab.db"
+        )
         self.debug: str = os.environ.get("DEBUG", "true")
         self.host: str = os.environ.get("HOST", "0.0.0.0")
         self.port: int = int(os.environ.get("PORT", "8000"))
