@@ -1,7 +1,9 @@
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.data.adapters.coingecko import CoinGeckoAdapter
@@ -60,3 +62,13 @@ async def health_check():
 async def root():
     """Root endpoint."""
     return {"message": "Welcome to trendlab"}
+
+
+# Serve frontend static files (must be LAST so API routes take priority)
+frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+if frontend_dist.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=str(frontend_dist), html=True),
+        name="frontend",
+    )

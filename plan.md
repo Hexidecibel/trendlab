@@ -1065,7 +1065,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Scaffold React + Vite + Tailwind project
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1115,7 +1115,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: API client module and TypeScript types
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1153,7 +1153,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Source selector and query input component
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1191,7 +1191,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Time-series line chart with raw data
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1230,7 +1230,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Forecast overlay with confidence bands
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1267,7 +1267,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Trend analysis panel
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1297,7 +1297,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Model comparison table
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1327,7 +1327,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: AI commentary section (Phase 5 optional)
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1361,7 +1361,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Responsive dashboard layout
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1397,7 +1397,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: FastAPI static file serving
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements
@@ -1434,7 +1434,7 @@ Items 3 and 4 are independent of each other and can be developed in either order
 ---
 
 ## Item: Development workflow scripts
-**Status:** planned
+**Status:** done
 **Phase:** 6
 
 ### Requirements

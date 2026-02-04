@@ -94,16 +94,16 @@
 
 **Goal:** Make the data visible — a lightweight frontend that renders charts from the API.
 
-- [planned] Choose frontend approach: React + Vite + Tailwind CSS, built and served from FastAPI
-- [planned] Implement time-series line chart with raw data (Chart.js via react-chartjs-2)
-- [planned] Add forecast overlay with confidence bands (shaded region) + model selector
-- [planned] Add trend analysis panel (direction indicator, seasonality, anomalies, breaks)
-- [planned] Add model comparison table (MAE/RMSE/MAPE, sortable, recommended highlighted)
-- [planned] Display AI commentary alongside charts (optional, graceful degradation if Phase 5 not implemented)
-- [planned] Add source selector, query input, and horizon control
-- [planned] Serve the frontend from FastAPI (StaticFiles mount, SPA catch-all)
-- [planned] Basic responsive layout — 2-col desktop, stacked tablet/mobile
-- [planned] API client module with TypeScript types matching Pydantic schemas
+- [x] Choose frontend approach: React + Vite + Tailwind CSS, built and served from FastAPI
+- [x] Implement time-series line chart with raw data (Chart.js via react-chartjs-2)
+- [x] Add forecast overlay with confidence bands (shaded region) + model selector
+- [x] Add trend analysis panel (direction indicator, seasonality, anomalies, breaks)
+- [x] Add model comparison table (MAE/RMSE/MAPE, sortable, recommended highlighted)
+- [x] Display AI commentary alongside charts (optional, graceful degradation if Phase 5 not implemented)
+- [x] Add source selector, query input, and horizon control
+- [x] Serve the frontend from FastAPI (StaticFiles mount, SPA catch-all)
+- [x] Basic responsive layout — 2-col desktop, stacked tablet/mobile
+- [x] API client module with TypeScript types matching Pydantic schemas
 
 **You'll have:** A dashboard you can open in a browser, pick a data source, and see trends + forecasts + AI commentary in one view.
 

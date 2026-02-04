@@ -23,10 +23,12 @@ tests/
 ```
 
 ## Commands
-- `uv run uvicorn app.main:app --reload` - Start dev server
+- `uv run uvicorn app.main:app --reload` - Start backend dev server
 - `uv run pytest` - Run tests
 - `uv run ruff check .` - Lint code
 - `uv run ruff format .` - Format code
+- `cd frontend && npm run dev` - Start frontend dev server (proxies /api to backend)
+- `cd frontend && npm run build` - Build frontend for production
 
 ## API Docs
 - Swagger UI: http://localhost:8000/docs
