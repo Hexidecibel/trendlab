@@ -21,10 +21,12 @@ from app.models.schemas import (
     TimeSeries,
     TrendAnalysis,
 )
+from app.services.cache import CachedFetcher
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+_cache = CachedFetcher(ttl_seconds=settings.cache_ttl)
 
 
 @router.get("/")
@@ -67,6 +69,7 @@ async def get_series(
     query: str = Query(..., description="Query string (e.g. package name)"),
     start: datetime.date | None = Query(None, description="Start date filter"),
     end: datetime.date | None = Query(None, description="End date filter"),
+    refresh: bool = Query(False, description="Bypass cache"),
 ):
     """Fetch time-series data from a named source."""
     try:
@@ -75,7 +78,7 @@ async def get_series(
         raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
 
     try:
-        return await adapter.fetch(query, start=start, end=end)
+        return await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -89,6 +92,7 @@ async def analyze_series(
     anomaly_method: str = Query(
         "zscore", description="Anomaly detection method: zscore or iqr"
     ),
+    refresh: bool = Query(False, description="Bypass cache"),
 ):
     """Fetch time-series data and run trend analysis."""
     try:
@@ -97,7 +101,7 @@ async def analyze_series(
         raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
 
     try:
-        ts = await adapter.fetch(query, start=start, end=end)
+        ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -114,6 +118,7 @@ async def forecast_series(
     horizon: int = Query(14, ge=1, le=365, description="Forecast horizon in days"),
     start: datetime.date | None = Query(None, description="Start date filter"),
     end: datetime.date | None = Query(None, description="End date filter"),
+    refresh: bool = Query(False, description="Bypass cache"),
 ):
     """Fetch time-series data and run forecasting with multiple models."""
     try:
@@ -122,7 +127,7 @@ async def forecast_series(
         raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
 
     try:
-        ts = await adapter.fetch(query, start=start, end=end)
+        ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -154,7 +159,7 @@ async def insight_stream(
         raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
 
     try:
-        ts = await adapter.fetch(query, start=start, end=end)
+        ts = await _cache.fetch(adapter, query, start=start, end=end)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
