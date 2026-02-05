@@ -18,12 +18,13 @@ import { fetchLookup } from '../api/client'
 
 export interface ComparePrefill {
   items: { source: string; query: string }[]
+  resample?: string
 }
 
 interface Props {
   sources: DataSourceInfo[]
   loading: boolean
-  onSubmit: (items: CompareItem[]) => void
+  onSubmit: (items: CompareItem[], resample?: string, apply?: string) => void
   prefill?: ComparePrefill | null
 }
 
@@ -51,6 +52,7 @@ function decomposeQuery(query: string, formFields: FormField[]): Record<string, 
 
 export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
   const [slots, setSlots] = useState<Slot[]>([emptySlot(), emptySlot()])
+  const [resample, setResample] = useState('')
   const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
   const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
   const [lastPrefill, setLastPrefill] = useState<ComparePrefill | null>(null)
@@ -61,6 +63,7 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
     if (!prefill || prefill === lastPrefill) return
     setLastPrefill(prefill)
     prefillRef.current = true
+    setResample(prefill.resample || '')
     const newSlots: Slot[] = prefill.items.map((item) => {
       const src = sources.find((s) => s.name === item.source)
       const fieldValues = src ? decomposeQuery(item.query, src.form_fields) : {}
@@ -167,7 +170,7 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
     const items: CompareItem[] = slots
       .filter(isSlotComplete)
       .map((slot) => ({ source: slot.source, query: buildQuery(slot) }))
-    if (items.length >= 2) onSubmit(items)
+    if (items.length >= 2) onSubmit(items, resample || undefined)
   }
 
   const renderField = (slotIndex: number, slot: Slot, field: FormField) => {
@@ -295,6 +298,20 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
               </Button>
             )}
             <Box sx={{ flex: 1 }} />
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Resample</InputLabel>
+              <Select
+                value={resample}
+                label="Resample"
+                onChange={(e) => setResample(e.target.value)}
+              >
+                <MenuItem value="">None</MenuItem>
+                <MenuItem value="week">Weekly</MenuItem>
+                <MenuItem value="month">Monthly</MenuItem>
+                <MenuItem value="quarter">Quarterly</MenuItem>
+                <MenuItem value="season">Seasonal</MenuItem>
+              </Select>
+            </FormControl>
             <Button type="submit" variant="contained" disabled={loading || !canSubmit}>
               {loading ? 'Loading...' : 'Compare'}
             </Button>

@@ -37,8 +37,11 @@ export async function fetchSeries(
   query: string,
   start?: string,
   end?: string,
+  resample?: string,
+  apply?: string,
+  refresh?: boolean,
 ): Promise<TimeSeries> {
-  const qs = buildParams({ source, query, start, end })
+  const qs = buildParams({ source, query, start, end, resample, apply, refresh: refresh ? 'true' : undefined })
   return fetchJson(`/api/series?${qs}`)
 }
 
@@ -47,8 +50,12 @@ export async function fetchAnalysis(
   query: string,
   start?: string,
   end?: string,
+  resample?: string,
+  apply?: string,
+  anomaly_method?: string,
+  refresh?: boolean,
 ): Promise<TrendAnalysis> {
-  const qs = buildParams({ source, query, start, end })
+  const qs = buildParams({ source, query, start, end, resample, apply, anomaly_method, refresh: refresh ? 'true' : undefined })
   return fetchJson(`/api/analyze?${qs}`)
 }
 
@@ -58,8 +65,11 @@ export async function fetchForecast(
   horizon?: number,
   start?: string,
   end?: string,
+  resample?: string,
+  apply?: string,
+  refresh?: boolean,
 ): Promise<ForecastComparison> {
-  const qs = buildParams({ source, query, horizon, start, end })
+  const qs = buildParams({ source, query, horizon, start, end, resample, apply, refresh: refresh ? 'true' : undefined })
   return fetchJson(`/api/forecast?${qs}`)
 }
 

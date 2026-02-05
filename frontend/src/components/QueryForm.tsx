@@ -6,10 +6,13 @@ import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
+import IconButton from '@mui/material/IconButton'
 import Link from '@mui/material/Link'
 import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
 import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import type { DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
 
@@ -19,12 +22,14 @@ export interface QueryPrefill {
   horizon: number
   start?: string
   end?: string
+  resample?: string
+  apply?: string
 }
 
 interface Props {
   sources: DataSourceInfo[]
   loading: boolean
-  onSubmit: (source: string, query: string, horizon: number, start?: string, end?: string) => void
+  onSubmit: (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => void
   prefill?: QueryPrefill | null
 }
 
@@ -47,6 +52,8 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
   const [horizon, setHorizon] = useState(14)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [resample, setResample] = useState('')
+  const [apply, setApply] = useState('')
   const [showDateRange, setShowDateRange] = useState(false)
   const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
   const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
@@ -63,6 +70,8 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
     prefillRef.current = true
     setSource(prefill.source)
     setHorizon(prefill.horizon)
+    setResample(prefill.resample || '')
+    setApply(prefill.apply || '')
     if (prefill.start || prefill.end) {
       setStartDate(prefill.start || '')
       setEndDate(prefill.end || '')
@@ -130,11 +139,11 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
     return parts.join(':')
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent, refresh?: boolean) => {
     e.preventDefault()
     const query = buildQuery()
     if (source && query) {
-      onSubmit(source, query, horizon, startDate || undefined, endDate || undefined)
+      onSubmit(source, query, horizon, startDate || undefined, endDate || undefined, resample || undefined, apply || undefined, refresh)
     }
   }
 
@@ -269,6 +278,23 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
             )}
 
             {source && (
+              <FormControl size="small" sx={{ minWidth: 130 }}>
+                <InputLabel>Resample</InputLabel>
+                <Select
+                  value={resample}
+                  label="Resample"
+                  onChange={(e) => setResample(e.target.value)}
+                >
+                  <MenuItem value="">None</MenuItem>
+                  <MenuItem value="week">Weekly</MenuItem>
+                  <MenuItem value="month">Monthly</MenuItem>
+                  <MenuItem value="quarter">Quarterly</MenuItem>
+                  <MenuItem value="season">Seasonal</MenuItem>
+                </Select>
+              </FormControl>
+            )}
+
+            {source && (
               <Link
                 component="button"
                 type="button"
@@ -276,7 +302,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
                 onClick={() => setShowDateRange(!showDateRange)}
                 sx={{ alignSelf: 'center', pb: 0.5 }}
               >
-                {showDateRange ? 'Hide dates' : 'Date range'}
+                {showDateRange ? 'Hide options' : 'More options'}
               </Link>
             )}
 
@@ -289,10 +315,21 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
                 {loading ? 'Loading...' : 'Analyze'}
               </Button>
             )}
+
+            {source && isComplete && !loading && (
+              <Tooltip title="Refresh (bypass cache)">
+                <IconButton
+                  size="small"
+                  onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
 
           {showDateRange && source && (
-            <Box sx={{ display: 'flex', gap: 1.5, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider', alignItems: 'flex-end' }}>
               <TextField
                 size="small"
                 label="Start Date"
@@ -311,12 +348,20 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
                 slotProps={{ inputLabel: { shrink: true } }}
                 sx={{ width: 170 }}
               />
-              {(startDate || endDate) && (
+              <TextField
+                size="small"
+                label="Transforms"
+                value={apply}
+                onChange={(e) => setApply(e.target.value)}
+                placeholder="e.g. normalize|rolling_avg_7d"
+                sx={{ minWidth: 220, flex: 1 }}
+              />
+              {(startDate || endDate || apply) && (
                 <Link
                   component="button"
                   type="button"
                   variant="body2"
-                  onClick={() => { setStartDate(''); setEndDate('') }}
+                  onClick={() => { setStartDate(''); setEndDate(''); setApply('') }}
                   sx={{ alignSelf: 'flex-end', pb: 0.5 }}
                 >
                   Clear

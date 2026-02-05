@@ -241,6 +241,8 @@ class NaturalQueryResponse(BaseModel):
     horizon: int = 14
     start: datetime.date | None = None
     end: datetime.date | None = None
+    resample: str | None = None
+    apply: str | None = None
     interpretation: str
 
 

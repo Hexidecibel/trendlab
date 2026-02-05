@@ -17,6 +17,8 @@ interface Props {
     horizon: number,
     start?: string,
     end?: string,
+    resample?: string,
+    apply?: string,
   ) => void
   onCompareResult?: (
     items: NaturalCompareItem[],
@@ -57,6 +59,8 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
           result.horizon,
           result.start ?? undefined,
           result.end ?? undefined,
+          result.resample ?? undefined,
+          result.apply ?? undefined,
         )
       }
     } catch (err: unknown) {

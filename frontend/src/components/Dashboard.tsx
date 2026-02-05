@@ -3,9 +3,13 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
+import FormControl from '@mui/material/FormControl'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import Checkbox from '@mui/material/Checkbox'
 import Grid from '@mui/material/Grid'
+import InputLabel from '@mui/material/InputLabel'
+import MenuItem from '@mui/material/MenuItem'
+import Select from '@mui/material/Select'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
@@ -36,27 +40,28 @@ export function Dashboard() {
   const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
+  const [anomalyMethod, setAnomalyMethod] = useState('zscore')
   const [queryPrefill, setQueryPrefill] = useState<QueryPrefill | null>(null)
   const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
 
-  const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string) => {
+  const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => {
     setActiveTab('explore')
     setLastQuery({ source, query, horizon })
     setSelectedModel('')
-    loadData(source, query, horizon, start, end)
+    loadData(source, query, horizon, start, end, resample, apply, anomalyMethod, refresh)
   }
 
-  const handleNlExplore = (source: string, query: string, horizon: number, start?: string, end?: string) => {
-    setQueryPrefill({ source, query, horizon, start, end })
-    handleSubmit(source, query, horizon, start, end)
+  const handleNlExplore = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string) => {
+    setQueryPrefill({ source, query, horizon, start, end, resample, apply })
+    handleSubmit(source, query, horizon, start, end, resample, apply)
   }
 
-  const handleCompare = async (items: CompareItem[]) => {
+  const handleCompare = async (items: CompareItem[], resample?: string, apply?: string) => {
     setCompareLoading(true)
     setCompareError(null)
     setCompareSeries(null)
     try {
-      const result = await fetchCompare(items)
+      const result = await fetchCompare(items, resample, apply)
       setCompareSeries(result.series)
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : String(err))
@@ -68,11 +73,12 @@ export function Dashboard() {
   const handleNlCompare = (
     items: NaturalCompareItem[],
     _interpretation: string,
-    _resample?: string,
+    resample?: string,
   ) => {
     setActiveTab('compare')
     setComparePrefill({
       items: items.map((i) => ({ source: i.source, query: i.query })),
+      resample,
     })
     const compareItems: CompareItem[] = items.map((i) => ({
       source: i.source,
@@ -80,7 +86,7 @@ export function Dashboard() {
       start: i.start ?? undefined,
       end: i.end ?? undefined,
     }))
-    handleCompare(compareItems)
+    handleCompare(compareItems, resample)
   }
 
   const effectiveModel =
@@ -155,7 +161,7 @@ export function Dashboard() {
                     showBreaks={showBreaks}
                     showAnomalies={showAnomalies}
                   />
-                  <Box sx={{ mt: 1, display: 'flex', gap: 2 }}>
+                  <Box sx={{ mt: 1, display: 'flex', gap: 2, alignItems: 'center' }}>
                     <FormControlLabel
                       control={
                         <Checkbox
@@ -176,6 +182,17 @@ export function Dashboard() {
                       }
                       label={<Typography variant="body2">Anomalies</Typography>}
                     />
+                    <FormControl size="small" sx={{ minWidth: 110 }}>
+                      <InputLabel>Anomaly method</InputLabel>
+                      <Select
+                        value={anomalyMethod}
+                        label="Anomaly method"
+                        onChange={(e) => setAnomalyMethod(e.target.value)}
+                      >
+                        <MenuItem value="zscore">Z-score</MenuItem>
+                        <MenuItem value="iqr">IQR</MenuItem>
+                      </Select>
+                    </FormControl>
                   </Box>
                   <Box sx={{ mt: 2 }}>
                     <EvaluationTable

@@ -223,6 +223,11 @@ RULES:
 8. COMPARE INTENT: If the user wants to compare multiple items (keywords: "compare",
    "vs", "versus", "and" between two entities, "side by side"), return a compare
    response with 2-3 items instead of a single query. Max 3 items.
+9. RESAMPLE / TRANSFORM: If the user mentions aggregation (weekly, monthly,
+   quarterly, seasonal), set "resample" to "week", "month", "quarter", or "season".
+   If they mention transforms (normalize, rolling average, percentage change),
+   set "apply" to a pipe-delimited string (e.g. "rolling_avg_7d|normalize").
+   Default both to null.
 
 {catalog}
 
@@ -230,20 +235,26 @@ EXAMPLES:
 
 Query: "Show me fastapi download trends"
 Response: {{"source": "pypi", "fields": {{"query": "fastapi"}}, "horizon": 14, \
-"start": null, "end": null, \
+"start": null, "end": null, "resample": null, "apply": null, \
 "interpretation": "PyPI download counts for the fastapi package"}}
 
 Query: "Seattle Sounders expected goals at home this season"
 Response: {{"source": "asa", "fields": {{"league": "mls", "entity_type": "teams", \
 "entity": "Seattle Sounders FC", "metric": "xgoals_for", "home_away": "home", \
 "stage": "regular"}}, "horizon": 14, "start": "{year}-01-01", "end": null, \
+"resample": null, "apply": null, \
 "interpretation": "Expected goals (xG) for Seattle Sounders FC in home MLS \
 regular season games this season"}}
 
 Query: "bitcoin price forecast for the next month"
 Response: {{"source": "crypto", "fields": {{"query": "bitcoin"}}, "horizon": 30, \
-"start": null, "end": null, \
+"start": null, "end": null, "resample": null, "apply": null, \
 "interpretation": "Bitcoin cryptocurrency price with a 30-day forecast horizon"}}
+
+Query: "fastapi monthly downloads with rolling average"
+Response: {{"source": "pypi", "fields": {{"query": "fastapi"}}, "horizon": 14, \
+"start": null, "end": null, "resample": "month", "apply": "rolling_avg_7d", \
+"interpretation": "PyPI downloads for fastapi aggregated monthly with rolling average"}}
 
 Query: "How's the weather in Seattle?"
 Response: {{"error": "This query doesn't match any available data source. \
@@ -280,6 +291,8 @@ Respond with JSON:
 {{"source": "<source_name>", "fields": {{<field_name>: <value>, ...}}, \
 "horizon": <integer>, "start": "<YYYY-MM-DD or null>", \
 "end": "<YYYY-MM-DD or null>", \
+"resample": "<week|month|quarter|season or null>", \
+"apply": "<pipe-delimited transforms or null>", \
 "interpretation": "<one sentence explaining what you understood>"}}
 
 If the user wants to COMPARE multiple items, respond with:
@@ -432,5 +445,7 @@ async def parse_and_resolve(
         horizon=parsed.get("horizon", 14),
         start=start,
         end=end,
+        resample=parsed.get("resample"),
+        apply=parsed.get("apply"),
         interpretation=parsed.get("interpretation", ""),
     )

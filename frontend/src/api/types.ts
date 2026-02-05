@@ -124,6 +124,8 @@ export interface NaturalQueryResponse {
   horizon: number
   start: string | null
   end: string | null
+  resample: string | null
+  apply: string | null
   interpretation: string
 }
 

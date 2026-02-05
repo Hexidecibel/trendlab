@@ -673,3 +673,31 @@ class TestParseAndResolveCompare:
 
         assert isinstance(result, NaturalQueryResponse)
         assert result.source == "pypi"
+
+    @pytest.mark.asyncio
+    async def test_single_query_with_resample_and_apply(self):
+        """Single query can include resample and apply fields."""
+        llm_response = json.dumps(
+            {
+                "source": "pypi",
+                "fields": {"query": "fastapi"},
+                "horizon": 14,
+                "start": None,
+                "end": None,
+                "resample": "month",
+                "apply": "rolling_avg_7d",
+                "interpretation": "fastapi monthly downloads with rolling average",
+            }
+        )
+
+        mock_client = MagicMock()
+        mock_client.generate = AsyncMock(return_value=llm_response)
+
+        result = await parse_and_resolve(
+            "fastapi monthly downloads with rolling average", mock_client
+        )
+
+        assert isinstance(result, NaturalQueryResponse)
+        assert result.source == "pypi"
+        assert result.resample == "month"
+        assert result.apply == "rolling_avg_7d"
