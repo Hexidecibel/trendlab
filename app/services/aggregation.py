@@ -1,9 +1,13 @@
 import datetime
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from app.models.schemas import DataPoint, TimeSeries
 
-_VALID_FREQS = {"day", "week", "month", "quarter", "season", "year"}
+if TYPE_CHECKING:
+    from app.data.base import DataAdapter
+
+_STANDARD_FREQS = {"day", "week", "month", "quarter", "season", "year"}
 
 
 def _week_bucket(d: datetime.date) -> datetime.date:
@@ -41,13 +45,16 @@ def resample_series(
     ts: TimeSeries,
     freq: str | None,
     method: str = "mean",
+    adapter: "DataAdapter | None" = None,
 ) -> TimeSeries:
     """Resample a TimeSeries to the given frequency.
 
     Args:
         ts: Input time series.
-        freq: One of "day", "week", "month", "quarter", "season", or None.
+        freq: Standard frequency ("day", "week", "month", "quarter", "season", "year")
+              or adapter-specific custom period.
         method: "mean" or "sum".
+        adapter: Optional adapter for custom resample periods.
 
     Returns:
         A new TimeSeries with aggregated points.
@@ -55,10 +62,24 @@ def resample_series(
     if freq is None or freq == "day":
         return ts
 
+    # Check if it's a standard frequency
     bucket_fn = _BUCKET_FN.get(freq)
+
     if bucket_fn is None:
+        # Not a standard freq - check for adapter custom resample
+        if adapter is not None:
+            custom_periods = {p.value for p in adapter.custom_resample_periods()}
+            if freq in custom_periods:
+                return adapter.custom_resample(ts, freq)
+
+        # Build helpful error message
+        valid = sorted(_STANDARD_FREQS)
+        if adapter is not None:
+            custom = [p.value for p in adapter.custom_resample_periods()]
+            if custom:
+                valid = valid + custom
         raise ValueError(
-            f"Unknown resample frequency '{freq}'. Valid: {sorted(_VALID_FREQS)}"
+            f"Unknown resample frequency '{freq}'. Valid: {valid}"
         )
 
     if not ts.points:

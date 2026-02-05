@@ -1,15 +1,25 @@
 import datetime
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.ai.query_parser import parse_and_resolve
-from app.ai.summarizer import summarize_compare_stream, summarize_stream
+from app.ai.summarizer import (
+    generate_headline,
+    summarize_compare_stream,
+    summarize_stream,
+)
 from app.analysis.correlation import correlate as run_correlate
 from app.analysis.engine import analyze
 from app.config import settings
+from app.data.adapters.csv_upload import (
+    delete_upload,
+    list_uploads,
+    parse_csv_content,
+    store_upload,
+)
 from app.data.registry import registry
 from app.db import repository as repo
 from app.forecasting.engine import forecast
@@ -31,9 +41,13 @@ from app.models.schemas import (
     SaveViewRequest,
     TimeSeries,
     TrendAnalysis,
+    WatchlistAddRequest,
+    WatchlistCheckResponse,
+    WatchlistItemResponse,
 )
 from app.services.aggregation import resample_series
 from app.services.cache import CachedFetcher
+from app.services.pdf_export import generate_pdf_report
 from app.services.transforms import apply_transforms
 
 logger = get_logger(__name__)
@@ -128,6 +142,96 @@ async def lookup(
     return await adapter.lookup(lookup_type, **kwargs)
 
 
+class CSVUploadResponse(BaseModel):
+    upload_id: str
+    name: str
+    points_count: int
+
+
+@router.post("/upload-csv", response_model=CSVUploadResponse, tags=["Data"])
+async def upload_csv(
+    file: UploadFile,
+    name: str = Form(..., description="Name for the uploaded dataset"),
+):
+    """
+    Upload a CSV file for analysis.
+
+    The CSV should have at least two columns: one for dates and one for values.
+    The adapter will auto-detect common column names like 'date', 'value', 'count', etc.
+
+    **Supported date formats:**
+    - YYYY-MM-DD (preferred)
+    - YYYY/MM/DD
+    - MM/DD/YYYY
+    - DD/MM/YYYY
+
+    Returns an upload_id that can be used with source='csv' in other endpoints.
+    """
+    if not file.filename or not file.filename.endswith(".csv"):
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a CSV file",
+        )
+
+    try:
+        content = await file.read()
+        content_str = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not decode file. Please ensure it's UTF-8 encoded.",
+        )
+
+    try:
+        series = parse_csv_content(content_str, name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    upload_id = store_upload(name, series)
+    return CSVUploadResponse(
+        upload_id=upload_id,
+        name=name,
+        points_count=len(series.points),
+    )
+
+
+class CSVListItem(BaseModel):
+    upload_id: str
+    name: str
+    points_count: int
+    created_at: datetime.datetime
+
+
+@router.get("/uploads", response_model=list[CSVListItem], tags=["Data"])
+async def get_uploads():
+    """
+    List all uploaded CSV datasets.
+
+    Returns metadata about each upload including ID, name, and point count.
+    """
+    uploads = list_uploads()
+    return [
+        CSVListItem(
+            upload_id=u.upload_id,
+            name=u.name,
+            points_count=len(u.series.points),
+            created_at=u.created_at,
+        )
+        for u in uploads
+    ]
+
+
+@router.delete("/uploads/{upload_id}", status_code=204, tags=["Data"])
+async def remove_upload(upload_id: str):
+    """
+    Delete an uploaded CSV dataset.
+
+    Permanently removes the uploaded data. Returns 204 on success.
+    """
+    if not delete_upload(upload_id):
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+
 @router.get("/series", response_model=TimeSeries, tags=["Data"])
 async def get_series(
     source: str = Query(..., description="Data source name (e.g. pypi, coingecko)"),
@@ -169,7 +273,7 @@ async def get_series(
         raise HTTPException(status_code=404, detail=str(e))
 
     if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method)
+        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
     if apply:
         ts = apply_transforms(ts, apply)
     return ts
@@ -213,7 +317,7 @@ async def analyze_series(
         raise HTTPException(status_code=404, detail=str(e))
 
     if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method)
+        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
     if apply:
         ts = apply_transforms(ts, apply)
 
@@ -263,7 +367,7 @@ async def forecast_series(
         raise HTTPException(status_code=404, detail=str(e))
 
     if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method)
+        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
     if apply:
         ts = apply_transforms(ts, apply)
 
@@ -271,6 +375,138 @@ async def forecast_series(
         return forecast(ts, horizon=horizon)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+class ForecastSnapshotResponse(BaseModel):
+    id: int
+    source: str
+    query: str
+    forecast_date: str
+    horizon: int
+    model_name: str
+    predictions: list[dict]
+    created_at: str
+
+
+class AccuracyResponse(BaseModel):
+    snapshot_id: int
+    forecast_date: str | None = None
+    model_name: str | None = None
+    matched_points: int
+    mae: float | None
+    rmse: float | None
+    within_ci_pct: float | None
+    details: list[dict] | None = None
+
+
+@router.post("/forecast-snapshot", tags=["Analysis"])
+async def save_forecast_snapshot_endpoint(
+    source: str = Query(..., description="Data source name"),
+    query: str = Query(..., description="Query string"),
+    model_name: str = Query(..., description="Model name (e.g. arima, ets)"),
+    horizon: int = Query(14, ge=1, le=365, description="Forecast horizon in days"),
+):
+    """
+    Save a forecast snapshot for later accuracy tracking.
+
+    Stores the current forecast predictions so they can be compared
+    against actual values once that data becomes available.
+    """
+    try:
+        adapter = registry.get(source)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+
+    try:
+        ts = await _cache.fetch(adapter, query)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    forecast_result = forecast(ts, horizon=horizon)
+
+    # Find the requested model
+    model_forecast = next(
+        (f for f in forecast_result.forecasts if f.model_name == model_name),
+        None,
+    )
+    if model_forecast is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model_name}' not found in forecast results",
+        )
+
+    # Save snapshot
+    predictions = [
+        {
+            "date": str(p.date),
+            "value": p.value,
+            "lower_ci": p.lower_ci,
+            "upper_ci": p.upper_ci,
+        }
+        for p in model_forecast.points
+    ]
+
+    snapshot_id = await repo.save_forecast_snapshot(
+        source=source,
+        query=query,
+        model_name=model_name,
+        horizon=horizon,
+        predictions=predictions,
+    )
+
+    return {"snapshot_id": snapshot_id, "message": "Forecast snapshot saved"}
+
+
+@router.get(
+    "/forecast-snapshots",
+    response_model=list[ForecastSnapshotResponse],
+    tags=["Analysis"],
+)
+async def get_forecast_snapshots(
+    source: str = Query(..., description="Data source name"),
+    query: str = Query(..., description="Query string"),
+    limit: int = Query(10, ge=1, le=50, description="Max results to return"),
+):
+    """
+    Get saved forecast snapshots for a source/query combination.
+
+    Returns past forecast predictions that can be compared against
+    actual values for accuracy tracking.
+    """
+    snapshots = await repo.get_forecast_snapshots(source, query, limit=limit)
+    return snapshots
+
+
+@router.get("/forecast-accuracy", response_model=AccuracyResponse, tags=["Analysis"])
+async def get_forecast_accuracy(
+    snapshot_id: int = Query(..., description="Forecast snapshot ID"),
+    source: str = Query(..., description="Data source name"),
+    query: str = Query(..., description="Query string"),
+):
+    """
+    Calculate accuracy metrics for a past forecast.
+
+    Compares the saved forecast predictions against actual values
+    and returns error metrics (MAE, RMSE) and confidence interval coverage.
+    """
+    try:
+        adapter = registry.get(source)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+
+    # Fetch current (actual) data
+    try:
+        ts = await _cache.fetch(adapter, query)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # Calculate accuracy
+    accuracy = await repo.calculate_forecast_accuracy(snapshot_id, ts.points)
+
+    if accuracy is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    return accuracy
 
 
 @router.post("/compare", response_model=CompareResponse, tags=["Comparison"])
@@ -307,7 +543,7 @@ async def compare_series(request: CompareRequest):
 
         if request.resample:
             ts = resample_series(
-                ts, request.resample, method=adapter.aggregation_method
+                ts, request.resample, method=adapter.aggregation_method, adapter=adapter
             )
         if request.apply:
             ts = apply_transforms(ts, request.apply)
@@ -355,7 +591,9 @@ async def compare_insight_stream(request: CompareRequest):
         )
 
         if request.resample:
-            ts = resample_series(ts, request.resample, method=adapter.aggregation_method)
+            ts = resample_series(
+                ts, request.resample, method=adapter.aggregation_method, adapter=adapter
+            )
         if request.apply:
             ts = apply_transforms(ts, request.apply)
 
@@ -441,7 +679,7 @@ async def correlate_series(request: CorrelateRequest):
 
         if request.resample:
             ts = resample_series(
-                ts, request.resample, method=adapter.aggregation_method
+                ts, request.resample, method=adapter.aggregation_method, adapter=adapter
             )
 
         series_list.append(ts)
@@ -508,6 +746,191 @@ async def delete_view(hash_id: str):
     deleted = await repo.delete_view(hash_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="View not found")
+
+
+# --- Watchlist Endpoints ---
+
+
+@router.post("/watchlist", response_model=WatchlistItemResponse, tags=["Watchlist"])
+async def add_to_watchlist(request: WatchlistAddRequest):
+    """
+    Add a trend to the watchlist.
+
+    Watch a specific source/query combination and optionally set a threshold
+    to be notified when the value crosses it.
+
+    **Threshold options:**
+    - `threshold_direction`: "above" or "below"
+    - `threshold_value`: The numeric threshold to watch for
+    """
+    return await repo.add_watchlist_item(
+        name=request.name,
+        source=request.source,
+        query=request.query,
+        resample=request.resample,
+        threshold_direction=request.threshold_direction,
+        threshold_value=request.threshold_value,
+    )
+
+
+@router.get("/watchlist", tags=["Watchlist"])
+async def list_watchlist() -> list[WatchlistItemResponse]:
+    """
+    List all watchlist items.
+
+    Returns all watched trends, newest first.
+    """
+    return await repo.list_watchlist()
+
+
+@router.get("/watchlist/check", tags=["Watchlist"])
+async def check_watchlist() -> WatchlistCheckResponse:
+    """
+    Refresh and check all watchlist items.
+
+    Fetches the latest value for each watched trend and checks if any
+    thresholds have been crossed. Returns all items with their current
+    status and a list of triggered alerts.
+    """
+    items = await repo.list_watchlist()
+    now = datetime.datetime.now(datetime.UTC)
+    updated_items: list[WatchlistItemResponse] = []
+    alerts: list[WatchlistItemResponse] = []
+
+    for item in items:
+        try:
+            adapter = registry.get(item.source)
+            ts = await _cache.fetch(adapter, item.query)
+
+            if item.resample:
+                ts = resample_series(
+                    ts,
+                    item.resample,
+                    method=adapter.aggregation_method,
+                    adapter=adapter,
+                )
+
+            # Get latest value and trend
+            if ts.points:
+                latest_value = ts.points[-1].value
+                trend_direction = None
+
+                # Calculate simple trend from last 5 points
+                if len(ts.points) >= 5:
+                    recent = [p.value for p in ts.points[-5:]]
+                    if recent[-1] > recent[0] * 1.05:
+                        trend_direction = "rising"
+                    elif recent[-1] < recent[0] * 0.95:
+                        trend_direction = "falling"
+                    else:
+                        trend_direction = "stable"
+
+                # Update the item
+                updated = await repo.update_watchlist_item(
+                    item.id, last_value=latest_value, last_checked_at=now
+                )
+
+                if updated:
+                    # Check threshold
+                    triggered = False
+                    if item.threshold_direction and item.threshold_value is not None:
+                        if item.threshold_direction == "above":
+                            triggered = latest_value > item.threshold_value
+                        elif item.threshold_direction == "below":
+                            triggered = latest_value < item.threshold_value
+
+                    updated.triggered = triggered
+                    updated.trend_direction = trend_direction
+                    updated_items.append(updated)
+
+                    if triggered:
+                        alerts.append(updated)
+            else:
+                updated_items.append(item)
+
+        except Exception as e:
+            logger.warning(f"Failed to check watchlist item {item.id}: {e}")
+            updated_items.append(item)
+
+    return WatchlistCheckResponse(
+        items=updated_items,
+        checked_at=now,
+        alerts=alerts,
+    )
+
+
+@router.get(
+    "/watchlist/{item_id}", response_model=WatchlistItemResponse, tags=["Watchlist"]
+)
+async def get_watchlist_item(item_id: int):
+    """
+    Get a single watchlist item by ID.
+    """
+    item = await repo.get_watchlist_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    return item
+
+
+@router.delete("/watchlist/{item_id}", status_code=204, tags=["Watchlist"])
+async def delete_from_watchlist(item_id: int):
+    """
+    Remove a trend from the watchlist.
+    """
+    deleted = await repo.delete_watchlist_item(item_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+
+
+@router.get("/export-pdf", tags=["Analysis"])
+async def export_pdf(
+    source: str = Query(..., description="Data source name"),
+    query: str = Query(..., description="Query string"),
+    horizon: int = Query(14, ge=1, le=365, description="Forecast horizon in days"),
+    start: datetime.date | None = Query(None, description="Start date filter"),
+    end: datetime.date | None = Query(None, description="End date filter"),
+    resample: str | None = Query(None, description="Resample frequency"),
+    apply: str | None = Query(None, description="Transforms to apply"),
+):
+    """
+    Export analysis as a PDF report.
+
+    Generates a comprehensive PDF document including:
+    - Summary statistics
+    - Trend analysis results
+    - Time series chart with forecast
+    - Model evaluation metrics
+
+    Returns a downloadable PDF file.
+    """
+    try:
+        adapter = registry.get(source)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+
+    try:
+        ts = await _cache.fetch(adapter, query, start=start, end=end)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    if resample:
+        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
+    if apply:
+        ts = apply_transforms(ts, apply)
+
+    analysis = analyze(ts)
+    forecast_result = forecast(ts, horizon=horizon)
+
+    # Generate PDF
+    pdf_buffer = generate_pdf_report(ts, analysis, forecast_result)
+
+    filename = f"trendlab-{source}-{query}-{datetime.date.today()}.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/insight", tags=["AI"])
@@ -577,6 +1000,77 @@ async def insight_stream(
             yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+class InsightFeedItem(BaseModel):
+    source: str
+    query: str
+    headline: str
+    trend_direction: str
+    momentum: float
+
+
+@router.get("/insights-feed", response_model=list[InsightFeedItem], tags=["AI"])
+async def insights_feed(
+    limit: int = Query(5, ge=1, le=10, description="Number of insights to return"),
+):
+    """
+    Get AI-generated headline summaries for trending data.
+
+    Analyzes recent/popular queries and generates one-sentence headlines
+    describing key trends. Useful for "What's interesting today?" dashboards.
+
+    Requires `ANTHROPIC_API_KEY` environment variable.
+    """
+    if not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY not configured",
+        )
+
+    # Predefined interesting queries to analyze
+    sample_queries = [
+        ("pypi", "fastapi"),
+        ("pypi", "requests"),
+        ("coingecko", "bitcoin"),
+        ("coingecko", "ethereum"),
+        ("npm", "react"),
+        ("npm", "express"),
+    ]
+
+    insights: list[InsightFeedItem] = []
+
+    for source, query in sample_queries[:limit]:
+        try:
+            adapter = registry.get(source)
+            ts = await _cache.fetch(adapter, query)
+
+            if not ts.points:
+                continue
+
+            analysis = analyze(ts)
+
+            # Generate AI headline
+            label = ts.metadata.get("package") or ts.metadata.get("coin") or query
+            headline = await generate_headline(analysis, label)
+
+            insights.append(
+                InsightFeedItem(
+                    source=source,
+                    query=query,
+                    headline=headline.strip(),
+                    trend_direction=analysis.trend.direction,
+                    momentum=analysis.trend.momentum,
+                )
+            )
+        except Exception as e:
+            logger.warning("Failed to generate insight for %s:%s: %s", source, query, e)
+            continue
+
+        if len(insights) >= limit:
+            break
+
+    return insights
 
 
 @router.post("/natural-query", tags=["AI"])

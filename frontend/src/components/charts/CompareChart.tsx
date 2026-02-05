@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Typography from '@mui/material/Typography'
+import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
 import type { ChartJS } from 'chart.js'
@@ -43,8 +44,42 @@ function getTimeUnit(resample?: string): TimeUnit {
     case 'quarter': return 'quarter'
     case 'season': return 'quarter'
     case 'year': return 'year'
+    // Custom resample periods - use year for seasonal aggregations
+    case 'mls_season': return 'year'
+    case 'football_season': return 'year'
+    case 'meteorological_season': return 'quarter'
     default: return 'day'
   }
+}
+
+// Get Y-axis label based on series metrics
+function getYAxisLabel(seriesList: TimeSeries[]): string {
+  if (seriesList.length === 0) return 'Value'
+
+  // Check if any series is normalized (transforms stored as array in metadata)
+  const isNormalized = seriesList.some(s => {
+    const meta = s.metadata as Record<string, unknown>
+    const transforms = meta.transforms as string[] | undefined
+    return transforms?.includes('normalize')
+  })
+  if (isNormalized) return 'Normalized Value'
+
+  // Collect all metric labels
+  const labels = seriesList.map(s => {
+    const meta = s.metadata as Record<string, unknown>
+    return (meta.metric_label as string) || (meta.metric as string) || null
+  })
+
+  // Filter out nulls and get unique labels
+  const uniqueLabels = [...new Set(labels.filter(Boolean))]
+
+  if (uniqueLabels.length === 1) {
+    return uniqueLabels[0] as string
+  } else if (uniqueLabels.length > 1) {
+    return 'Value (mixed metrics)'
+  }
+
+  return 'Value'
 }
 
 interface Props {
@@ -57,6 +92,17 @@ export function CompareChart({ seriesList, resample }: Props) {
 
   const handleResetZoom = () => {
     chartRef.current?.resetZoom()
+  }
+
+  const handleDownloadPng = () => {
+    const chart = chartRef.current
+    if (!chart) return
+    const url = chart.toBase64Image()
+    const link = document.createElement('a')
+    const labels = seriesList.map(s => s.query).join('-vs-')
+    link.download = `compare-${labels}.png`
+    link.href = url
+    link.click()
   }
 
   if (seriesList.length === 0) return null
@@ -84,7 +130,7 @@ export function CompareChart({ seriesList, resample }: Props) {
         title: { display: true, text: 'Date' },
       },
       y: {
-        title: { display: true, text: 'Value' },
+        title: { display: true, text: getYAxisLabel(seriesList) },
       },
     },
     plugins: {
@@ -104,15 +150,26 @@ export function CompareChart({ seriesList, resample }: Props) {
           <Typography variant="subtitle2">
             Series Comparison
           </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ZoomOutMapIcon />}
-            onClick={handleResetZoom}
-            sx={{ textTransform: 'none', fontSize: '0.75rem' }}
-          >
-            Reset Zoom
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={handleDownloadPng}
+              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+            >
+              PNG
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ZoomOutMapIcon />}
+              onClick={handleResetZoom}
+              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+            >
+              Reset Zoom
+            </Button>
+          </Box>
         </Box>
         <Box sx={{ height: 400 }}>
           <Line ref={chartRef} data={{ datasets }} options={options} />

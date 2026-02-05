@@ -10,6 +10,7 @@ from app.models.schemas import (
     FormField,
     FormFieldOption,
     LookupItem,
+    ResamplePeriod,
     TimeSeries,
 )
 
@@ -53,6 +54,59 @@ class FootballDataAdapter(DataAdapter):
                 depends_on="competition",
             ),
         ]
+
+    def custom_resample_periods(self) -> list[ResamplePeriod]:
+        return [
+            ResamplePeriod(
+                value="football_season",
+                label="Football Season",
+                description="European football season (Aug-May, e.g., 2023-24)",
+            ),
+        ]
+
+    def custom_resample(self, series: TimeSeries, period: str) -> TimeSeries:
+        """Resample by European football season (Aug-May)."""
+        if period != "football_season":
+            raise NotImplementedError(f"Unknown custom period: {period}")
+
+        if not series.points:
+            return TimeSeries(
+                source=series.source,
+                query=series.query,
+                points=[],
+                metadata={**series.metadata, "resample": period},
+            )
+
+        from collections import defaultdict
+
+        def get_season_year(d: datetime.date) -> int:
+            """Return season start year. Aug-Dec = that year, Jan-Jul = prior year."""
+            if d.month >= 8:  # Aug-Dec
+                return d.year
+            else:  # Jan-Jul
+                return d.year - 1
+
+        # Group by season
+        buckets: dict[int, list[float]] = defaultdict(list)
+        for p in series.points:
+            season_year = get_season_year(p.date)
+            buckets[season_year].append(p.value)
+
+        # Sum goals per season
+        points = [
+            DataPoint(
+                date=datetime.date(year, 8, 1),  # Use Aug 1 as season start marker
+                value=sum(values),
+            )
+            for year, values in sorted(buckets.items())
+        ]
+
+        return TimeSeries(
+            source=series.source,
+            query=series.query,
+            points=points,
+            metadata={**series.metadata, "resample": period},
+        )
 
     async def lookup(self, lookup_type: str, **kwargs: str) -> list[LookupItem]:
         if lookup_type != "teams":

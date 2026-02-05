@@ -1,12 +1,19 @@
 import type {
   CompareItem,
   CompareResponse,
+  CorrelateRequest,
+  CorrelateResponse,
   DataSourceInfo,
   ForecastComparison,
   LookupItem,
   NaturalQueryResult,
+  SavedViewResponse,
+  SaveViewRequest,
   TimeSeries,
   TrendAnalysis,
+  WatchlistAddRequest,
+  WatchlistCheckResponse,
+  WatchlistItem,
 } from './types'
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -116,4 +123,79 @@ export async function parseNaturalQuery(
     throw detail
   }
   return response.json()
+}
+
+export async function fetchCorrelate(
+  request: CorrelateRequest,
+): Promise<CorrelateResponse> {
+  const response = await fetch('/api/correlate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }))
+    throw new Error(detail.detail || `HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchViews(): Promise<SavedViewResponse[]> {
+  return fetchJson('/api/views')
+}
+
+export async function fetchView(hashId: string): Promise<SavedViewResponse> {
+  return fetchJson(`/api/views/${hashId}`)
+}
+
+export async function saveView(request: SaveViewRequest): Promise<SavedViewResponse> {
+  const response = await fetch('/api/views', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }))
+    throw new Error(detail.detail || `HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function deleteView(hashId: string): Promise<void> {
+  const response = await fetch(`/api/views/${hashId}`, { method: 'DELETE' })
+  if (!response.ok && response.status !== 204) {
+    throw new Error(`Failed to delete view: ${response.status}`)
+  }
+}
+
+// Watchlist API functions
+
+export async function fetchWatchlist(): Promise<WatchlistItem[]> {
+  return fetchJson('/api/watchlist')
+}
+
+export async function addToWatchlist(
+  request: WatchlistAddRequest,
+): Promise<WatchlistItem> {
+  const response = await fetch('/api/watchlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }))
+    throw new Error(detail.detail || `HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function checkWatchlist(): Promise<WatchlistCheckResponse> {
+  return fetchJson('/api/watchlist/check')
+}
+
+export async function deleteWatchlistItem(itemId: number): Promise<void> {
+  const response = await fetch(`/api/watchlist/${itemId}`, { method: 'DELETE' })
+  if (!response.ok && response.status !== 204) {
+    throw new Error(`Failed to delete watchlist item: ${response.status}`)
+  }
 }

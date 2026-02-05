@@ -12,6 +12,7 @@ from app.models.schemas import (
     FormField,
     FormFieldOption,
     LookupItem,
+    ResamplePeriod,
     TimeSeries,
 )
 
@@ -147,6 +148,80 @@ class ASAAdapter(DataAdapter):
             ),
         ]
 
+    def custom_resample_periods(self) -> list[ResamplePeriod]:
+        return [
+            ResamplePeriod(
+                value="mls_season",
+                label="MLS Season",
+                description="Aggregate by MLS/NWSL/USL season (Feb-Dec)",
+            ),
+        ]
+
+    def custom_resample(self, series: TimeSeries, period: str) -> TimeSeries:
+        """Resample by MLS/NWSL/USL season using actual season_name from API."""
+        if period != "mls_season":
+            raise NotImplementedError(f"Unknown custom period: {period}")
+
+        if not series.points:
+            return TimeSeries(
+                source=series.source,
+                query=series.query,
+                points=[],
+                metadata={**series.metadata, "resample": period},
+            )
+
+        from collections import defaultdict
+
+        # Get date->season mapping from metadata
+        date_to_season = series.metadata.get("date_to_season", {})
+
+        # Group by season
+        buckets: dict[str, list[float]] = defaultdict(list)
+        for p in series.points:
+            # Look up season from metadata, fall back to year if not found
+            season = date_to_season.get(p.date.isoformat(), str(p.date.year))
+            buckets[season].append(p.value)
+
+        # Determine aggregation method based on metric
+        metric = series.metadata.get("metric", "")
+        # Sum metrics: goals, points, shots, passes
+        sum_metrics = {
+            "goals_for", "goals_against", "goal_difference",
+            "shots_for", "shots_against", "points",
+            "attempted_passes_for", "passes_completed_over_expected_for",
+        }
+        use_sum = metric in sum_metrics
+
+        agg_fn = sum if use_sum else (lambda vals: sum(vals) / len(vals))
+
+        # Sort seasons and create points
+        # Use Feb 1 of season year as representative date (MLS starts ~late Feb)
+        points = []
+        for season in sorted(buckets.keys()):
+            try:
+                season_year = int(season)
+            except ValueError:
+                season_year = 2000  # Fallback for non-numeric seasons
+            points.append(
+                DataPoint(
+                    date=datetime.date(season_year, 2, 1),
+                    value=agg_fn(buckets[season]),
+                )
+            )
+
+        # Remove date_to_season from output metadata (it's large and internal)
+        output_meta = {
+            k: v for k, v in series.metadata.items() if k != "date_to_season"
+        }
+        output_meta["resample"] = period
+
+        return TimeSeries(
+            source=series.source,
+            query=series.query,
+            points=points,
+            metadata=output_meta,
+        )
+
     async def lookup(self, lookup_type: str, **kwargs: str) -> list[LookupItem]:
         league = kwargs.get("league", "mls")
         if league not in LEAGUES:
@@ -207,14 +282,16 @@ class ASAAdapter(DataAdapter):
 
         endpoint_category = METRIC_ENDPOINT[metric]
 
-        # Fetch games and metric data
-        game_dates = await self._fetch_game_dates(
+        # Fetch games (with season info) and metric data
+        game_dates, game_seasons = await self._fetch_game_info(
             league, team_id, home_away=home_away, stage=stage
         )
         metric_data = await self._fetch_metric_data(league, team_id, endpoint_category)
 
         # Build time series by joining on game_id
+        # Also build date->season mapping for custom resample
         points = []
+        date_to_season: dict[str, str] = {}
         for row in metric_data:
             game_id = row.get("game_id")
             if game_id not in game_dates:
@@ -222,14 +299,24 @@ class ASAAdapter(DataAdapter):
             value = row.get(metric)
             if value is None:
                 continue
-            points.append(DataPoint(date=game_dates[game_id], value=float(value)))
+            game_date = game_dates[game_id]
+            points.append(DataPoint(date=game_date, value=float(value)))
+            date_to_season[game_date.isoformat()] = game_seasons.get(game_id, "")
 
         points.sort(key=lambda p: p.date)
 
         if start:
             points = [p for p in points if p.date >= start]
+            date_to_season = {
+                d: s for d, s in date_to_season.items()
+                if datetime.date.fromisoformat(d) >= start
+            }
         if end:
             points = [p for p in points if p.date <= end]
+            date_to_season = {
+                d: s for d, s in date_to_season.items()
+                if datetime.date.fromisoformat(d) <= end
+            }
 
         # Look up team name for better display
         team_name = await self._get_team_name(league, team_id)
@@ -242,6 +329,7 @@ class ASAAdapter(DataAdapter):
             "metric_label": METRIC_LABELS.get(metric, metric),
             "home_away": home_away,
             "stage": stage,
+            "date_to_season": date_to_season,  # For custom resample
         }
         if team_name:
             meta["team"] = team_name
@@ -253,15 +341,15 @@ class ASAAdapter(DataAdapter):
             metadata=meta,
         )
 
-    async def _fetch_game_dates(
+    async def _fetch_game_info(
         self,
         league: str,
         team_id: str,
         *,
         home_away: str = "all",
         stage: str = "all",
-    ) -> dict[str, datetime.date]:
-        """Fetch games and return a mapping of game_id -> date."""
+    ) -> tuple[dict[str, datetime.date], dict[str, str]]:
+        """Fetch games and return mappings of game_id -> date and game_id -> season."""
         url = f"{ASA_API_URL}/{league}/games"
         params = {"team_id": team_id}
 
@@ -278,6 +366,7 @@ class ASAAdapter(DataAdapter):
 
         games = response.json()
         date_map: dict[str, datetime.date] = {}
+        season_map: dict[str, str] = {}
         for game in games:
             game_id = game["game_id"]
 
@@ -299,8 +388,9 @@ class ASAAdapter(DataAdapter):
                 dt_str.replace(" UTC", ""), "%Y-%m-%d %H:%M:%S"
             )
             date_map[game_id] = dt.date()
+            season_map[game_id] = game.get("season_name", str(dt.year))
 
-        return date_map
+        return date_map, season_map
 
     async def _fetch_metric_data(
         self,

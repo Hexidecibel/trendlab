@@ -11,7 +11,10 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.data.adapters.asa import ASAAdapter
 from app.data.adapters.coingecko import CoinGeckoAdapter
+from app.data.adapters.csv_upload import CSVUploadAdapter
+from app.data.adapters.npm import NpmAdapter
 from app.data.adapters.pypi import PyPIAdapter
+from app.data.adapters.reddit import RedditAdapter
 from app.data.adapters.weather import WeatherAdapter
 from app.data.adapters.wikipedia import WikipediaAdapter
 from app.data.adapters.yahoo_finance import YahooFinanceAdapter
@@ -24,6 +27,7 @@ from app.middleware import (
     RequestLoggingMiddleware,
     SecretPhraseMiddleware,
 )
+from app.plugins import load_plugins
 from app.routers import api
 
 # Initialize logging before anything else
@@ -35,6 +39,9 @@ setup_logging(
 logger = get_logger(__name__)
 
 registry.register(PyPIAdapter())
+registry.register(NpmAdapter())
+registry.register(CSVUploadAdapter())
+registry.register(RedditAdapter())
 registry.register(CoinGeckoAdapter())
 registry.register(ASAAdapter())
 registry.register(WikipediaAdapter())
@@ -57,6 +64,10 @@ else:
         "FOOTBALL_DATA_TOKEN not set — football adapter will not be available"
     )
 
+# Load community plugins from plugins/ directory
+plugin_count = load_plugins()
+if plugin_count:
+    logger.info("Loaded %d community plugin(s)", plugin_count)
 
 
 @asynccontextmanager

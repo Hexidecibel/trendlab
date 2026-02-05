@@ -28,6 +28,14 @@ import { AnalysisPanel } from './AnalysisPanel'
 import { EvaluationTable } from './EvaluationTable'
 import { InsightPanel } from './InsightPanel'
 import { CompareInsightPanel } from './CompareInsightPanel'
+import { CorrelateTab } from './CorrelateTab'
+import { SaveViewButton } from './SaveViewButton'
+import { ViewsDropdown } from './ViewsDropdown'
+import { InsightsFeed } from './InsightsFeed'
+import { ExportPdfButton } from './ExportPdfButton'
+import { ForecastAccuracyPanel } from './ForecastAccuracyPanel'
+import { WatchlistPanel } from './WatchlistPanel'
+import type { SavedViewResponse } from '../api/types'
 
 // Generate a friendly label from series metadata or query
 function getFriendlyLabel(s: TimeSeries): string {
@@ -60,7 +68,7 @@ export function Dashboard() {
   const [showBreaks, setShowBreaks] = useState(true)
   const [showAnomalies, setShowAnomalies] = useState(true)
 
-  const [activeTab, setActiveTab] = useState<'forecast' | 'compare'>('forecast')
+  const [activeTab, setActiveTab] = useState<'forecast' | 'compare' | 'correlate'>('forecast')
   const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
   const [compareAnalyses, setCompareAnalyses] = useState<TrendAnalysis[] | null>(null)
   const [compareResample, setCompareResample] = useState('')
@@ -71,12 +79,36 @@ export function Dashboard() {
   const [anomalyMethod, setAnomalyMethod] = useState('zscore')
   const [queryPrefill, setQueryPrefill] = useState<QueryPrefill | null>(null)
   const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
+  const [lastApply, setLastApply] = useState('')
 
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => {
     setActiveTab('forecast')
     setLastQuery({ source, query, horizon, resample: resample || '' })
+    setLastApply(apply || '')
     setSelectedModel('')
     loadData(source, query, horizon, start, end, resample, apply, anomalyMethod, refresh)
+  }
+
+  const handleLoadView = (view: SavedViewResponse) => {
+    setActiveTab('forecast')
+    setQueryPrefill({
+      source: view.source,
+      query: view.query,
+      horizon: view.horizon,
+      start: view.start ?? undefined,
+      end: view.end ?? undefined,
+      resample: view.resample ?? undefined,
+      apply: view.apply ?? undefined,
+    })
+    handleSubmit(
+      view.source,
+      view.query,
+      view.horizon,
+      view.start ?? undefined,
+      view.end ?? undefined,
+      view.resample ?? undefined,
+      view.apply ?? undefined,
+    )
   }
 
   const handleNlExplore = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string) => {
@@ -136,14 +168,19 @@ export function Dashboard() {
         onCompareResult={handleNlCompare}
       />
 
-      <Tabs
-        value={activeTab}
-        onChange={(_, v) => setActiveTab(v)}
-        sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab value="forecast" label="Forecast" />
-        <Tab value="compare" label="Compare" />
-      </Tabs>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => setActiveTab(v)}
+        >
+          <Tab value="forecast" label="Forecast" />
+          <Tab value="compare" label="Compare" />
+          <Tab value="correlate" label="Correlate" />
+        </Tabs>
+        <Box sx={{ pb: 1 }}>
+          <ViewsDropdown onLoadView={handleLoadView} />
+        </Box>
+      </Box>
 
       {activeTab === 'forecast' && (
         <>
@@ -177,12 +214,29 @@ export function Dashboard() {
 
           {hasData && (
             <>
-              <Box sx={{ mb: 2 }}>
+              <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <ModelSelector
                   forecast={forecast}
                   selected={effectiveModel}
                   onChange={setSelectedModel}
                 />
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <ExportPdfButton
+                    source={lastQuery.source}
+                    query={lastQuery.query}
+                    horizon={lastQuery.horizon}
+                    resample={lastQuery.resample || undefined}
+                    apply={lastApply || undefined}
+                  />
+                  <SaveViewButton
+                    source={lastQuery.source}
+                    query={lastQuery.query}
+                    horizon={lastQuery.horizon}
+                    resample={lastQuery.resample || undefined}
+                    apply={lastApply || undefined}
+                    anomalyMethod={anomalyMethod}
+                  />
+                </Box>
               </Box>
 
               <Grid container spacing={3}>
@@ -235,6 +289,13 @@ export function Dashboard() {
                       recommended={forecast.recommended_model}
                     />
                   </Box>
+                  {lastQuery.source && lastQuery.query && (
+                    <ForecastAccuracyPanel
+                      source={lastQuery.source}
+                      query={lastQuery.query}
+                      forecast={forecast}
+                    />
+                  )}
                 </Grid>
 
                 <Grid size={{ xs: 12, lg: 4 }}>
@@ -257,14 +318,29 @@ export function Dashboard() {
           )}
 
           {!hasData && !loading && !error && (
-            <Box sx={{ textAlign: 'center', py: 8 }}>
-              <Typography variant="body1" color="text.secondary" gutterBottom>
-                Select a data source and enter a query to get started
-              </Typography>
-              <Typography variant="body2" color="text.disabled">
-                Try PyPI with "fastapi" or Crypto with "bitcoin"
-              </Typography>
-            </Box>
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, md: 8 }}>
+                <Box sx={{ textAlign: 'center', py: 8 }}>
+                  <Typography variant="body1" color="text.secondary" gutterBottom>
+                    Select a data source and enter a query to get started
+                  </Typography>
+                  <Typography variant="body2" color="text.disabled">
+                    Try PyPI with "fastapi" or Crypto with "bitcoin"
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <InsightsFeed
+                  onSelectInsight={(source, query) => handleSubmit(source, query, 14)}
+                />
+                <Box sx={{ mt: 2 }}>
+                  <WatchlistPanel
+                    sources={sources}
+                    onLoadQuery={(source, query) => handleSubmit(source, query, 14)}
+                  />
+                </Box>
+              </Grid>
+            </Grid>
           )}
         </>
       )}
@@ -342,6 +418,10 @@ export function Dashboard() {
             </Box>
           )}
         </>
+      )}
+
+      {activeTab === 'correlate' && (
+        <CorrelateTab sources={sources} />
       )}
     </Box>
   )

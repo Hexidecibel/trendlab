@@ -1,7 +1,7 @@
 import datetime
 from abc import ABC, abstractmethod
 
-from app.models.schemas import FormField, LookupItem, TimeSeries
+from app.models.schemas import FormField, LookupItem, ResamplePeriod, TimeSeries
 
 
 class DataAdapter(ABC):
@@ -38,3 +38,28 @@ class DataAdapter(ABC):
         Override to provide dynamic options (e.g. team lists, player lists).
         """
         return []
+
+    def custom_resample_periods(self) -> list[ResamplePeriod]:
+        """Return custom resample periods this adapter supports.
+
+        Override to provide domain-specific time periods (e.g. sports seasons).
+        Default returns empty list (only standard periods available).
+        """
+        return []
+
+    def custom_resample(self, series: TimeSeries, period: str) -> TimeSeries:
+        """Apply custom resampling to a time series.
+
+        Override to implement adapter-specific resampling logic.
+        Only called for periods returned by custom_resample_periods().
+
+        Args:
+            series: Input time series.
+            period: Custom period identifier (e.g. "mls_season").
+
+        Returns:
+            Resampled TimeSeries.
+        """
+        raise NotImplementedError(
+            f"Adapter '{self.name}' does not support custom resample period '{period}'"
+        )

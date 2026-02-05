@@ -8,9 +8,11 @@ import app.db.engine as _engine_mod
 from app.db.models import (
     AnalysisRecord,
     ForecastRecord,
+    ForecastSnapshot,
     QueryConfig,
     SavedView,
     SeriesRecord,
+    WatchlistItem,
 )
 from app.models.schemas import (
     DataPoint,
@@ -18,6 +20,7 @@ from app.models.schemas import (
     SavedViewResponse,
     TimeSeries,
     TrendAnalysis,
+    WatchlistItemResponse,
 )
 
 
@@ -306,6 +309,231 @@ async def delete_view(hash_id: str) -> bool:
     """Delete a saved view by hash_id. Returns True if deleted."""
     async with _engine_mod.async_session() as session:
         stmt = select(SavedView).where(SavedView.hash_id == hash_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return False
+        await session.delete(record)
+        await session.commit()
+        return True
+
+
+# --- Forecast Snapshots ---
+
+
+async def save_forecast_snapshot(
+    source: str,
+    query: str,
+    model_name: str,
+    horizon: int,
+    predictions: list[dict],
+) -> int:
+    """Save a forecast snapshot and return its id."""
+    async with _engine_mod.async_session() as session:
+        record = ForecastSnapshot(
+            source=source,
+            query=query,
+            forecast_date=datetime.date.today(),
+            horizon=horizon,
+            model_name=model_name,
+            predictions_json=json.dumps(predictions),
+        )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        return record.id
+
+
+async def get_forecast_snapshots(
+    source: str,
+    query: str,
+    limit: int = 10,
+) -> list[dict]:
+    """Get recent forecast snapshots for a source/query combination."""
+    async with _engine_mod.async_session() as session:
+        stmt = (
+            select(ForecastSnapshot)
+            .where(
+                ForecastSnapshot.source == source,
+                ForecastSnapshot.query == query,
+            )
+            .order_by(ForecastSnapshot.forecast_date.desc())
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        records = result.scalars().all()
+
+        return [
+            {
+                "id": r.id,
+                "source": r.source,
+                "query": r.query,
+                "forecast_date": r.forecast_date.isoformat(),
+                "horizon": r.horizon,
+                "model_name": r.model_name,
+                "predictions": json.loads(r.predictions_json),
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in records
+        ]
+
+
+async def calculate_forecast_accuracy(
+    snapshot_id: int,
+    actual_points: list[DataPoint],
+) -> dict | None:
+    """Calculate accuracy metrics for a forecast snapshot against actual values."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(ForecastSnapshot).where(ForecastSnapshot.id == snapshot_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+
+        if record is None:
+            return None
+
+        predictions = json.loads(record.predictions_json)
+        actual_by_date = {str(p.date): p.value for p in actual_points}
+
+        # Match predictions to actuals
+        matched = []
+        for pred in predictions:
+            pred_date = pred["date"]
+            if pred_date in actual_by_date:
+                matched.append({
+                    "date": pred_date,
+                    "predicted": pred["value"],
+                    "actual": actual_by_date[pred_date],
+                    "lower_ci": pred.get("lower_ci"),
+                    "upper_ci": pred.get("upper_ci"),
+                })
+
+        if not matched:
+            return {
+                "snapshot_id": snapshot_id,
+                "matched_points": 0,
+                "mae": None,
+                "rmse": None,
+                "within_ci_pct": None,
+            }
+
+        # Calculate metrics
+        errors = [abs(m["predicted"] - m["actual"]) for m in matched]
+        mae = sum(errors) / len(errors)
+        rmse = (sum(e**2 for e in errors) / len(errors)) ** 0.5
+
+        # Check how many actuals fell within CI
+        within_ci = 0
+        for m in matched:
+            if m["lower_ci"] is not None and m["upper_ci"] is not None:
+                if m["lower_ci"] <= m["actual"] <= m["upper_ci"]:
+                    within_ci += 1
+
+        within_ci_pct = (within_ci / len(matched) * 100) if matched else None
+
+        return {
+            "snapshot_id": snapshot_id,
+            "forecast_date": record.forecast_date.isoformat(),
+            "model_name": record.model_name,
+            "matched_points": len(matched),
+            "mae": round(mae, 4),
+            "rmse": round(rmse, 4),
+            "within_ci_pct": round(within_ci_pct, 1) if within_ci_pct else None,
+            "details": matched,
+        }
+
+
+# --- Watchlist ---
+
+
+def _watchlist_to_response(record: WatchlistItem) -> WatchlistItemResponse:
+    """Convert DB record to response model."""
+    return WatchlistItemResponse(
+        id=record.id,
+        name=record.name,
+        source=record.source,
+        query=record.query,
+        resample=record.resample,
+        threshold_direction=record.threshold_direction,
+        threshold_value=(
+            float(record.threshold_value) if record.threshold_value else None
+        ),
+        last_value=float(record.last_value) if record.last_value else None,
+        last_checked_at=record.last_checked_at,
+        created_at=record.created_at,
+    )
+
+
+async def add_watchlist_item(
+    name: str,
+    source: str,
+    query: str,
+    resample: str | None = None,
+    threshold_direction: str | None = None,
+    threshold_value: float | None = None,
+) -> WatchlistItemResponse:
+    """Add a new item to the watchlist."""
+    async with _engine_mod.async_session() as session:
+        record = WatchlistItem(
+            name=name,
+            source=source,
+            query=query,
+            resample=resample,
+            threshold_direction=threshold_direction,
+            threshold_value=int(threshold_value) if threshold_value else None,
+        )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        return _watchlist_to_response(record)
+
+
+async def list_watchlist() -> list[WatchlistItemResponse]:
+    """List all watchlist items, newest first."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(WatchlistItem).order_by(WatchlistItem.created_at.desc())
+        result = await session.execute(stmt)
+        records = result.scalars().all()
+        return [_watchlist_to_response(r) for r in records]
+
+
+async def get_watchlist_item(item_id: int) -> WatchlistItemResponse | None:
+    """Get a single watchlist item by ID."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(WatchlistItem).where(WatchlistItem.id == item_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        return _watchlist_to_response(record)
+
+
+async def update_watchlist_item(
+    item_id: int,
+    last_value: float | None = None,
+    last_checked_at: datetime.datetime | None = None,
+) -> WatchlistItemResponse | None:
+    """Update a watchlist item with new values."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(WatchlistItem).where(WatchlistItem.id == item_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+
+        if last_value is not None:
+            record.last_value = int(last_value)
+        if last_checked_at is not None:
+            record.last_checked_at = last_checked_at
+
+        await session.commit()
+        await session.refresh(record)
+        return _watchlist_to_response(record)
+
+
+async def delete_watchlist_item(item_id: int) -> bool:
+    """Delete a watchlist item. Returns True if deleted."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(WatchlistItem).where(WatchlistItem.id == item_id)
         result = await session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:

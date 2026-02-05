@@ -97,3 +97,35 @@ class SavedView(Base):
     apply = Column(String)
     anomaly_method = Column(String, default="zscore")
     created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class ForecastSnapshot(Base):
+    __tablename__ = "forecast_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String, nullable=False)
+    query = Column(String, nullable=False)
+    forecast_date = Column(Date, nullable=False)  # Date when forecast was made
+    horizon = Column(Integer, nullable=False)
+    model_name = Column(String, nullable=False)
+    predictions_json = Column(Text, nullable=False)  # [{date, value, lower_ci, upper_ci}, ...]
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class WatchlistItem(Base):
+    __tablename__ = "watchlist_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)  # User-friendly name
+    source = Column(String, nullable=False)
+    query = Column(String, nullable=False)
+    resample = Column(String)  # Optional resampling
+    threshold_direction = Column(String)  # 'above', 'below', or None
+    threshold_value = Column(Integer)  # Threshold for alerts
+    last_value = Column(Integer)  # Most recent value
+    last_checked_at = Column(DateTime)  # When last refreshed
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("source", "query", name="uq_watchlist_source_query"),
+    )

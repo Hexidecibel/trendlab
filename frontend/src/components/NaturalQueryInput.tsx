@@ -14,11 +14,11 @@ import { isCompareResult } from '../api/types'
 import type { NaturalCompareItem } from '../api/types'
 
 const EXAMPLE_QUERIES = [
-  // Sports - MLS teams
+  // Sports - MLS teams with season resampling
+  { text: 'LA Galaxy goals by MLS season', category: 'Sports' },
   { text: 'Seattle Sounders vs Portland Timbers xG this season', category: 'Sports' },
-  { text: 'Los Angeles FC expected goals at home, monthly', category: 'Sports' },
-  { text: 'Inter Miami CF goals scored this season', category: 'Sports' },
-  { text: 'Compare LA Galaxy and Austin FC xG', category: 'Sports' },
+  { text: 'Compare Inter Miami and LAFC expected goals by season', category: 'Sports' },
+  { text: 'Austin FC xG at home this season, weekly', category: 'Sports' },
   // Stocks & Finance
   { text: 'Tesla stock price last 6 months, weekly', category: 'Finance' },
   { text: 'Compare Apple and Microsoft stock prices this year', category: 'Finance' },
@@ -26,16 +26,17 @@ const EXAMPLE_QUERIES = [
   { text: 'NVIDIA trading volume last quarter', category: 'Finance' },
   // Tech & Open Source
   { text: 'FastAPI downloads this year with rolling average', category: 'Tech' },
-  { text: 'Compare pandas and numpy downloads monthly', category: 'Tech' },
-  { text: 'Python requests library weekly downloads', category: 'Tech' },
+  { text: 'Compare pandas, numpy, and polars downloads monthly', category: 'Tech' },
+  { text: 'Correlate React and TypeScript npm downloads', category: 'Tech' },
+  { text: 'Python requests vs httpx weekly downloads', category: 'Tech' },
   // Wikipedia & Culture
   { text: 'ChatGPT Wikipedia views last 90 days', category: 'Culture' },
   { text: 'Compare Python and JavaScript Wikipedia page views', category: 'Culture' },
-  { text: 'Taylor Swift Wikipedia traffic last 30 days', category: 'Culture' },
-  // Weather
-  { text: 'Seattle temperature last 90 days', category: 'Weather' },
-  { text: 'Compare New York and Los Angeles temperature monthly', category: 'Weather' },
-  { text: 'Miami precipitation last 6 months', category: 'Weather' },
+  { text: 'Taylor Swift Wikipedia traffic with rolling average', category: 'Culture' },
+  // Weather with meteorological seasons
+  { text: 'Seattle temperature by meteorological season', category: 'Weather' },
+  { text: 'Compare New York and Miami temperature monthly', category: 'Weather' },
+  { text: 'Chicago precipitation last year by season', category: 'Weather' },
 ]
 
 interface Props {
@@ -197,8 +198,9 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
             </Box>
           ))}
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            Tip: Use "vs" or "compare" to overlay multiple series. Add "monthly", "weekly", or
-            "by season" for aggregation. Try "normalized" or "rolling average" for transforms.
+            Tip: Use "vs" or "compare" to overlay series. Say "correlate" to find relationships.
+            Try "by MLS season" or "by meteorological season" for custom aggregation.
+            Add "normalized" or "rolling average" for transforms.
           </Typography>
         </Box>
       </Collapse>

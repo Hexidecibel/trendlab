@@ -59,6 +59,31 @@ async def summarize_stream(
         yield chunk
 
 
+async def generate_headline(
+    analysis: TrendAnalysis,
+    label: str,
+    client: LLMClient | None = None,
+) -> str:
+    """Generate a single-sentence headline summary for a trend."""
+    llm = _get_client(client)
+
+    system_prompt = """You are a financial news headline writer.
+Write ONE short sentence (under 100 characters) summarizing the trend.
+Be specific with direction and momentum. No quotes or markdown."""
+
+    user_prompt = f"""Series: {label}
+Trend: {analysis.trend.direction} (momentum: {analysis.trend.momentum:.4f})
+Anomalies: {analysis.anomalies.anomaly_count}
+Breaks: {len(analysis.structural_breaks)}"""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    return await llm.generate(messages)
+
+
 async def summarize_compare_stream(
     analyses: list[TrendAnalysis],
     labels: list[str],

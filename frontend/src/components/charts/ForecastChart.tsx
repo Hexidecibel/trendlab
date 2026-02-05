@@ -4,6 +4,7 @@ import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Typography from '@mui/material/Typography'
+import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
 import type { ChartJS } from 'chart.js'
@@ -18,8 +19,19 @@ function getTimeUnit(resample?: string): TimeUnit {
     case 'quarter': return 'quarter'
     case 'season': return 'quarter'
     case 'year': return 'year'
+    // Custom resample periods - use year for seasonal aggregations
+    case 'mls_season': return 'year'
+    case 'football_season': return 'year'
+    case 'meteorological_season': return 'quarter'
     default: return 'day'
   }
+}
+
+// Get a human-readable label for the y-axis
+function getYAxisLabel(series: TimeSeries): string {
+  const meta = series.metadata as Record<string, unknown>
+  // Try metric_label first, then metric, then fall back to Value
+  return (meta.metric_label as string) || (meta.metric as string) || 'Value'
 }
 
 interface Props {
@@ -45,6 +57,16 @@ export function ForecastChart({
 
   const handleResetZoom = () => {
     chartRef.current?.resetZoom()
+  }
+
+  const handleDownloadPng = () => {
+    const chart = chartRef.current
+    if (!chart) return
+    const url = chart.toBase64Image()
+    const link = document.createElement('a')
+    link.download = `forecast-${series.source}-${series.query}.png`
+    link.href = url
+    link.click()
   }
 
   const modelForecast = forecast.forecasts.find(
@@ -157,7 +179,7 @@ export function ForecastChart({
         title: { display: true, text: 'Date' },
       },
       y: {
-        title: { display: true, text: 'Value' },
+        title: { display: true, text: getYAxisLabel(series) },
       },
     },
     plugins: {
@@ -186,15 +208,26 @@ export function ForecastChart({
           <Typography variant="subtitle2">
             Time Series & Forecast
           </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ZoomOutMapIcon />}
-            onClick={handleResetZoom}
-            sx={{ textTransform: 'none', fontSize: '0.75rem' }}
-          >
-            Reset Zoom
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={handleDownloadPng}
+              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+            >
+              PNG
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ZoomOutMapIcon />}
+              onClick={handleResetZoom}
+              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+            >
+              Reset Zoom
+            </Button>
+          </Box>
         </Box>
         <Box sx={{ height: 320 }}>
           <Line ref={chartRef} data={data} options={options} />

@@ -1,10 +1,16 @@
 import os
 
+# Disable rate limiting and auth for tests - must be set before importing app
+# Set explicitly to empty string to override .env file
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["TRENDLAB_SECRET_PHRASE"] = ""  # Empty = no auth required
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-# Disable rate limiting for tests
-os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Import and patch settings before app imports it
+from app import config  # noqa: E402
+config.settings.secret_phrase = None  # Explicitly disable auth
 
 from app.main import app  # noqa: E402
 

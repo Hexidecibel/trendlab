@@ -314,6 +314,17 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
                 <MenuItem value="quarter">Quarterly</MenuItem>
                 <MenuItem value="season">Seasonal</MenuItem>
                 <MenuItem value="year">Yearly</MenuItem>
+                {/* Show custom resample periods from selected sources */}
+                {Array.from(new Set(
+                  slots
+                    .map(slot => sources.find(s => s.name === slot.source))
+                    .filter(Boolean)
+                    .flatMap(s => s?.resample_periods || [])
+                    .map(p => JSON.stringify(p))
+                )).map(json => {
+                  const p = JSON.parse(json)
+                  return <MenuItem key={p.value} value={p.value}>{p.label}</MenuItem>
+                })}
               </Select>
             </FormControl>
             <Button type="submit" variant="contained" disabled={loading || !canSubmit}>

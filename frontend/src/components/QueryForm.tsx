@@ -17,6 +17,7 @@ import Typography from '@mui/material/Typography'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import type { DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
+import { CSVUpload } from './CSVUpload'
 
 export interface QueryPrefill {
   source: string
@@ -61,6 +62,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
   const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
   const [lastPrefill, setLastPrefill] = useState<QueryPrefill | null>(null)
   const prefillRef = useRef(false)
+  const [csvRefreshKey, setCsvRefreshKey] = useState(0)
 
   const selectedSource = sources.find((s) => s.name === source)
   const formFields = selectedSource?.form_fields || []
@@ -102,8 +104,8 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
       // For entity field, also factor in entity_type to cache key
       const entityType = fieldValues['entity_type'] || ''
       const cacheKey = field.name === 'entity'
-        ? `${source}:${field.name}:${depValue}:${entityType}`
-        : `${source}:${field.name}:${depValue}`
+        ? `${source}:${field.name}:${depValue}:${entityType}:${csvRefreshKey}`
+        : `${source}:${field.name}:${depValue}:${csvRefreshKey}`
 
       if (lookupCache[cacheKey] || lookupLoading[cacheKey]) return
       if (field.depends_on && !depValue) return
@@ -127,7 +129,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
         setLookupLoading((prev) => ({ ...prev, [cacheKey]: false }))
       }
     },
-    [source, fieldValues, lookupCache, lookupLoading],
+    [source, fieldValues, lookupCache, lookupLoading, csvRefreshKey],
   )
 
   useEffect(() => {
@@ -179,9 +181,15 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
     const depValue = field.depends_on ? fieldValues[field.depends_on] : ''
     const entityType = fieldValues['entity_type'] || ''
     const cacheKey = field.name === 'entity'
-      ? `${source}:${field.name}:${depValue}:${entityType}`
-      : `${source}:${field.name}:${depValue}`
+      ? `${source}:${field.name}:${depValue}:${entityType}:${csvRefreshKey}`
+      : `${source}:${field.name}:${depValue}:${csvRefreshKey}`
     return lookupCache[cacheKey] || []
+  }
+
+  const handleCsvUploadComplete = (uploadId: string) => {
+    // Refresh lookup cache and select the newly uploaded dataset
+    setCsvRefreshKey((k) => k + 1)
+    setFieldValues({ query: uploadId })
   }
 
   const isComplete =
@@ -284,6 +292,10 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
 
             {formFields.map(renderField)}
 
+            {source === 'csv' && (
+              <CSVUpload onUploadComplete={handleCsvUploadComplete} />
+            )}
+
             {source && (
               <Box sx={{ width: 180, px: 1 }}>
                 <Typography variant="caption" color="text.secondary" gutterBottom>
@@ -321,6 +333,11 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
                   <MenuItem value="quarter">Quarterly</MenuItem>
                   <MenuItem value="season">Seasonal</MenuItem>
                   <MenuItem value="year">Yearly</MenuItem>
+                  {selectedSource?.resample_periods?.map((period) => (
+                    <MenuItem key={period.value} value={period.value}>
+                      {period.label}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
             )}

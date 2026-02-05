@@ -18,6 +18,7 @@ class AdapterRegistry:
                 name=a.name,
                 description=a.description,
                 form_fields=a.form_fields(),
+                resample_periods=a.custom_resample_periods(),
             )
             for a in self._adapters.values()
         ]

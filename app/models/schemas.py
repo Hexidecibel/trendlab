@@ -41,10 +41,19 @@ class FormField(BaseModel):
     depends_on: str | None = None  # field name this depends on
 
 
+class ResamplePeriod(BaseModel):
+    """Custom resample period supported by an adapter."""
+
+    value: str  # e.g. "mls_season"
+    label: str  # e.g. "MLS Season"
+    description: str = ""  # e.g. "Aggregate by MLS season (Feb-Nov)"
+
+
 class DataSourceInfo(BaseModel):
     name: str
     description: str
     form_fields: list[FormField] = Field(default_factory=list)
+    resample_periods: list[ResamplePeriod] = Field(default_factory=list)
 
 
 class LookupItem(BaseModel):
@@ -347,3 +356,43 @@ class CompareInsightFollowupRequest(BaseModel):
     messages: list[ChatMessage]  # Conversation history
     context_summary: str  # The initial AI comparison summary
     data_contexts: list[DataContext] | None = None  # Rich context for each series
+
+
+# --- Watchlist models ---
+
+
+class WatchlistAddRequest(BaseModel):
+    """Request to add a trend to the watchlist."""
+
+    name: str  # User-friendly name for this watch
+    source: str
+    query: str
+    resample: str | None = None
+    threshold_direction: str | None = None  # "above" or "below"
+    threshold_value: float | None = None
+
+
+class WatchlistItemResponse(BaseModel):
+    """Response for a single watchlist item."""
+
+    id: int
+    name: str
+    source: str
+    query: str
+    resample: str | None = None
+    threshold_direction: str | None = None
+    threshold_value: float | None = None
+    last_value: float | None = None
+    last_checked_at: datetime.datetime | None = None
+    created_at: datetime.datetime
+    # Computed fields for status
+    triggered: bool = False  # True if threshold crossed
+    trend_direction: str | None = None  # "rising", "falling", "stable"
+
+
+class WatchlistCheckResponse(BaseModel):
+    """Response from checking/refreshing the watchlist."""
+
+    items: list[WatchlistItemResponse]
+    checked_at: datetime.datetime
+    alerts: list[WatchlistItemResponse] = Field(default_factory=list)

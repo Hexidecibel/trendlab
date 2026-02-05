@@ -24,10 +24,17 @@ export interface FormField {
   depends_on: string | null
 }
 
+export interface ResamplePeriod {
+  value: string
+  label: string
+  description: string
+}
+
 export interface DataSourceInfo {
   name: string
   description: string
   form_fields: FormField[]
+  resample_periods: ResamplePeriod[]
 }
 
 export interface LookupItem {
@@ -166,6 +173,106 @@ export interface NaturalQueryError {
     error: string
     suggestions: string[]
   }
+}
+
+// Correlation types
+export interface CorrelationCoefficient {
+  r: number
+  p_value: number
+}
+
+export interface LagCorrelation {
+  lag: number
+  correlation: number
+}
+
+export interface ScatterPoint {
+  x: number
+  y: number
+}
+
+export interface CorrelateItem {
+  source: string
+  query: string
+  start?: string
+  end?: string
+}
+
+export interface CorrelateRequest {
+  series_a: CorrelateItem
+  series_b: CorrelateItem
+  start?: string
+  end?: string
+  resample?: string
+  refresh?: boolean
+}
+
+// Saved Views types
+export interface SaveViewRequest {
+  name: string
+  source: string
+  query: string
+  horizon?: number
+  start?: string
+  end?: string
+  resample?: string
+  apply?: string
+  anomaly_method?: string
+}
+
+export interface SavedViewResponse {
+  hash_id: string
+  name: string
+  source: string
+  query: string
+  horizon: number
+  start: string | null
+  end: string | null
+  resample: string | null
+  apply: string | null
+  anomaly_method: string
+  created_at: string
+}
+
+export interface CorrelateResponse {
+  series_a_label: string
+  series_b_label: string
+  aligned_points: number
+  pearson: CorrelationCoefficient
+  spearman: CorrelationCoefficient
+  lag_analysis: LagCorrelation[]
+  scatter: ScatterPoint[]
+}
+
+// Watchlist types
+export interface WatchlistAddRequest {
+  name: string
+  source: string
+  query: string
+  resample?: string
+  threshold_direction?: 'above' | 'below'
+  threshold_value?: number
+}
+
+export interface WatchlistItem {
+  id: number
+  name: string
+  source: string
+  query: string
+  resample?: string
+  threshold_direction?: 'above' | 'below'
+  threshold_value?: number
+  last_value?: number
+  last_checked_at?: string
+  created_at: string
+  triggered: boolean
+  trend_direction?: 'rising' | 'falling' | 'stable'
+}
+
+export interface WatchlistCheckResponse {
+  items: WatchlistItem[]
+  checked_at: string
+  alerts: WatchlistItem[]
 }
 
 // Rich data context for AI follow-up questions

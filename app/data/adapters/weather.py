@@ -11,6 +11,7 @@ from app.models.schemas import (
     FormField,
     FormFieldOption,
     LookupItem,
+    ResamplePeriod,
     TimeSeries,
 )
 
@@ -102,6 +103,76 @@ class WeatherAdapter(DataAdapter):
                 ],
             ),
         ]
+
+    def custom_resample_periods(self) -> list[ResamplePeriod]:
+        return [
+            ResamplePeriod(
+                value="meteorological_season",
+                label="Meteorological Season",
+                description="Winter/Spring/Summer/Fall (3-month periods)",
+            ),
+        ]
+
+    def custom_resample(self, series: TimeSeries, period: str) -> TimeSeries:
+        """Resample by meteorological season."""
+        if period != "meteorological_season":
+            raise NotImplementedError(f"Unknown custom period: {period}")
+
+        if not series.points:
+            return TimeSeries(
+                source=series.source,
+                query=series.query,
+                points=[],
+                metadata={**series.metadata, "resample": period},
+            )
+
+        from collections import defaultdict
+
+        # Season order for sorting: winter=0, spring=1, summer=2, fall=3
+        season_order = {"winter": 0, "spring": 1, "summer": 2, "fall": 3}
+
+        def get_season_key(d: datetime.date) -> tuple[int, int, str]:
+            """Return (year, order, season) tuple. Dec belongs to next year's winter."""
+            month = d.month
+            year = d.year
+            if month in (12, 1, 2):
+                # Winter - Dec is part of next year's winter
+                season_year = year if month != 12 else year + 1
+                return (season_year, season_order["winter"], "winter")
+            elif month in (3, 4, 5):
+                return (year, season_order["spring"], "spring")
+            elif month in (6, 7, 8):
+                return (year, season_order["summer"], "summer")
+            else:  # 9, 10, 11
+                return (year, season_order["fall"], "fall")
+
+        def season_to_date(year: int, season: str) -> datetime.date:
+            """Convert season to representative date (first month of season)."""
+            month_map = {"winter": 1, "spring": 3, "summer": 6, "fall": 9}
+            # For winter, use Jan of the season year
+            return datetime.date(year, month_map[season], 1)
+
+        # Group by season
+        buckets: dict[tuple[int, int, str], list[float]] = defaultdict(list)
+        for p in series.points:
+            key = get_season_key(p.date)
+            buckets[key].append(p.value)
+
+        # Aggregate using mean (appropriate for weather data)
+        points = [
+            DataPoint(
+                date=season_to_date(year, season),
+                value=sum(values) / len(values),
+            )
+            for (year, order, season), values in sorted(buckets.items())
+        ]
+
+        return TimeSeries(
+            source=series.source,
+            query=series.query,
+            points=points,
+            metadata={**series.metadata, "resample": period},
+        )
 
     async def lookup(self, lookup_type: str, **kwargs: str) -> list[LookupItem]:
         """Search for locations using Open-Meteo geocoding."""
