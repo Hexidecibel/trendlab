@@ -212,12 +212,8 @@ class TestResolveEntities:
         with patch("app.ai.query_parser.registry") as mock_registry:
             mock_registry.get.return_value = mock_adapter
 
-            await resolve_entities(
-                "asa", {"league": "mls", "entity": "LA Galaxy"}
-            )
-            mock_adapter.lookup.assert_called_once_with(
-                "teams", league="mls"
-            )
+            await resolve_entities("asa", {"league": "mls", "entity": "LA Galaxy"})
+            mock_adapter.lookup.assert_called_once_with("teams", league="mls")
 
 
 class TestParseAndResolve:
@@ -284,9 +280,7 @@ class TestParseAndResolve:
             mock_registry.get.return_value = mock_adapter
             mock_registry.list_sources.return_value = []
 
-            result = await parse_and_resolve(
-                "Seattle Sounders xG at home", mock_client
-            )
+            result = await parse_and_resolve("Seattle Sounders xG at home", mock_client)
 
         assert isinstance(result, NaturalQueryResponse)
         assert result.source == "asa"
@@ -315,9 +309,7 @@ class TestParseAndResolve:
     @pytest.mark.asyncio
     async def test_llm_returns_unparseable_text(self):
         mock_client = MagicMock()
-        mock_client.generate = AsyncMock(
-            return_value="I don't understand your query"
-        )
+        mock_client.generate = AsyncMock(return_value="I don't understand your query")
 
         result = await parse_and_resolve("test", mock_client)
 

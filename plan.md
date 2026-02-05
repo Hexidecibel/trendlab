@@ -690,7 +690,7 @@ class ErrorResponse(BaseModel):
 ---
 
 ### Item 10: Frontend Redesign (MUI)
-**Status:** planned
+**Status:** done
 **Tier:** 3 — UX & Polish
 
 #### Requirements

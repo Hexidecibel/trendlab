@@ -170,8 +170,7 @@ async def resolve_entities(
         else:
             available = ", ".join(item.label for item in lookup_items[:10])
             raise ValueError(
-                f"Could not resolve '{human_name}'. "
-                f"Available: {available}"
+                f"Could not resolve '{human_name}'. Available: {available}"
             )
 
     return resolved

@@ -40,8 +40,9 @@ class TestNaturalQueryEndpoint:
 
         with (
             patch("app.routers.api.settings") as mock_settings,
-            patch("app.routers.api.parse_and_resolve", new_callable=AsyncMock)
-            as mock_parse,
+            patch(
+                "app.routers.api.parse_and_resolve", new_callable=AsyncMock
+            ) as mock_parse,
         ):
             mock_settings.anthropic_api_key = "test-key"
             mock_parse.return_value = mock_result
@@ -66,8 +67,9 @@ class TestNaturalQueryEndpoint:
 
         with (
             patch("app.routers.api.settings") as mock_settings,
-            patch("app.routers.api.parse_and_resolve", new_callable=AsyncMock)
-            as mock_parse,
+            patch(
+                "app.routers.api.parse_and_resolve", new_callable=AsyncMock
+            ) as mock_parse,
         ):
             mock_settings.anthropic_api_key = "test-key"
             mock_parse.return_value = mock_result
@@ -102,8 +104,9 @@ class TestNaturalQueryEndpoint:
 
         with (
             patch("app.routers.api.settings") as mock_settings,
-            patch("app.routers.api.parse_and_resolve", new_callable=AsyncMock)
-            as mock_parse,
+            patch(
+                "app.routers.api.parse_and_resolve", new_callable=AsyncMock
+            ) as mock_parse,
         ):
             mock_settings.anthropic_api_key = "test-key"
             mock_parse.return_value = mock_result

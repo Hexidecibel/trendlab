@@ -31,7 +31,7 @@ Make it feel finished.
 
 - [x] Saved views / shareable URLs: persist query config + results to DB, generate short URL or hash — load full view (series, analysis, forecast, annotations) from a single link
 - [x] Add proper error handling and structured error responses across all endpoints
-- [planned] Frontend redesign — migrate to MUI (Material UI), better theme, better structuring/layout of data (currently functional but dense with a lot of information on screen)
+- [x] Frontend redesign — migrate to MUI (Material UI), better theme, better structuring/layout of data (currently functional but dense with a lot of information on screen)
 - [x] Add player-level queries to ASA adapter (xgoals, goals-added, xpass per player per game)
 - [x] Enhance current adapters — ASA allows advanced config of querying; determine if other adapters (PyPI, crypto, football-data) could benefit from similar configurable fields
 

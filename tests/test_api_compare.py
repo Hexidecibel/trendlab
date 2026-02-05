@@ -81,9 +81,7 @@ class TestCompareEndpoint:
         response = await client.post(
             "/api/compare",
             json={
-                "items": [
-                    {"source": "crypto", "query": f"coin{i}"} for i in range(4)
-                ]
+                "items": [{"source": "crypto", "query": f"coin{i}"} for i in range(4)]
             },
         )
         assert response.status_code == 422
