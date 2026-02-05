@@ -162,6 +162,50 @@ class InsightReport(BaseModel):
 # --- Natural Language Query models ---
 
 
+# --- Correlation models ---
+
+
+class CorrelationCoefficient(BaseModel):
+    r: float
+    p_value: float
+
+
+class LagCorrelation(BaseModel):
+    lag: int
+    correlation: float
+
+
+class ScatterPoint(BaseModel):
+    x: float
+    y: float
+
+
+class CorrelateItem(BaseModel):
+    source: str
+    query: str
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+
+
+class CorrelateRequest(BaseModel):
+    series_a: CorrelateItem
+    series_b: CorrelateItem
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    resample: str | None = None
+    refresh: bool = False
+
+
+class CorrelateResponse(BaseModel):
+    series_a_label: str
+    series_b_label: str
+    aligned_points: int
+    pearson: CorrelationCoefficient
+    spearman: CorrelationCoefficient
+    lag_analysis: list[LagCorrelation]
+    scatter: list[ScatterPoint]
+
+
 # --- Comparison models ---
 
 

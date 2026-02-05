@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from app.ai.query_parser import parse_and_resolve
 from app.ai.summarizer import summarize_stream
+from app.analysis.correlation import correlate as run_correlate
 from app.analysis.engine import analyze
 from app.config import settings
 from app.data.registry import registry
@@ -14,6 +15,8 @@ from app.forecasting.engine import forecast
 from app.models.schemas import (
     CompareRequest,
     CompareResponse,
+    CorrelateRequest,
+    CorrelateResponse,
     DataSourceInfo,
     ForecastComparison,
     LookupItem,
@@ -212,6 +215,48 @@ async def compare_series(request: CompareRequest):
         result_series.append(ts)
 
     return CompareResponse(series=result_series, count=len(result_series))
+
+
+@router.post("/correlate", response_model=CorrelateResponse)
+async def correlate_series(request: CorrelateRequest):
+    """Compute correlation between two time series."""
+    items = [request.series_a, request.series_b]
+    series_list: list[TimeSeries] = []
+
+    for item in items:
+        try:
+            adapter = registry.get(item.source)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source '{item.source}' not found",
+            )
+
+        start = item.start or request.start
+        end = item.end or request.end
+
+        try:
+            ts = await _cache.fetch(
+                adapter,
+                item.query,
+                start=start,
+                end=end,
+                refresh=request.refresh,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+        if request.resample:
+            ts = resample_series(
+                ts, request.resample, method=adapter.aggregation_method
+            )
+
+        series_list.append(ts)
+
+    try:
+        return run_correlate(series_list[0], series_list[1])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/insight")
