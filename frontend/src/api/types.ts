@@ -127,6 +127,37 @@ export interface NaturalQueryResponse {
   interpretation: string
 }
 
+export interface NaturalCompareItem {
+  source: string
+  query: string
+  start: string | null
+  end: string | null
+}
+
+export interface NaturalCompareResponse {
+  items: NaturalCompareItem[]
+  resample: string | null
+  interpretation: string
+}
+
+export type NaturalQueryResult = NaturalQueryResponse | NaturalCompareResponse
+
+export function isCompareResult(r: NaturalQueryResult): r is NaturalCompareResponse {
+  return 'items' in r
+}
+
+export interface CompareItem {
+  source: string
+  query: string
+  start?: string
+  end?: string
+}
+
+export interface CompareResponse {
+  series: TimeSeries[]
+  count: number
+}
+
 export interface NaturalQueryError {
   detail: {
     error: string

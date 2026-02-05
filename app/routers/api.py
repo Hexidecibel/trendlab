@@ -23,7 +23,6 @@ from app.models.schemas import (
     LookupItem,
     NaturalQueryError,
     NaturalQueryRequest,
-    NaturalQueryResponse,
     SavedViewResponse,
     SaveViewRequest,
     TimeSeries,
@@ -356,7 +355,7 @@ async def insight_stream(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-@router.post("/natural-query", response_model=NaturalQueryResponse)
+@router.post("/natural-query")
 async def natural_query(request: NaturalQueryRequest):
     """Parse natural language into structured query parameters."""
     if not settings.anthropic_api_key:

@@ -1,8 +1,10 @@
 import type {
+  CompareItem,
+  CompareResponse,
   DataSourceInfo,
   ForecastComparison,
   LookupItem,
-  NaturalQueryResponse,
+  NaturalQueryResult,
   TimeSeries,
   TrendAnalysis,
 } from './types'
@@ -76,9 +78,26 @@ export async function fetchLookup(
   return fetchJson(`/api/lookup?${qs}`)
 }
 
+export async function fetchCompare(
+  items: CompareItem[],
+  resample?: string,
+  apply?: string,
+): Promise<CompareResponse> {
+  const response = await fetch('/api/compare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, resample, apply }),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }))
+    throw new Error(detail.detail || `HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
 export async function parseNaturalQuery(
   text: string,
-): Promise<NaturalQueryResponse> {
+): Promise<NaturalQueryResult> {
   const response = await fetch('/api/natural-query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

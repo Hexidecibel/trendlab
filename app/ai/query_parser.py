@@ -9,6 +9,8 @@ from app.config import settings
 from app.data.registry import registry
 from app.models.schemas import (
     LookupItem,
+    NaturalCompareItem,
+    NaturalCompareResponse,
     NaturalQueryError,
     NaturalQueryResponse,
 )
@@ -218,6 +220,9 @@ RULES:
    - "this season" / "this year" → start = {year}-01-01
    - "last 30 days" → start = appropriate date
    - If no date mentioned, set start and end to null.
+8. COMPARE INTENT: If the user wants to compare multiple items (keywords: "compare",
+   "vs", "versus", "and" between two entities, "side by side"), return a compare
+   response with 2-3 items instead of a single query. Max 3 items.
 
 {catalog}
 
@@ -244,7 +249,26 @@ Query: "How's the weather in Seattle?"
 Response: {{"error": "This query doesn't match any available data source. \
 TrendLab tracks software packages, cryptocurrencies, and soccer metrics.", \
 "suggestions": ["Try 'Bitcoin price trend'", "Try 'fastapi download counts'", \
-"Try 'Seattle Sounders expected goals'"]}}"""
+"Try 'Seattle Sounders expected goals'"]}}
+
+Query: "compare fastapi and django downloads"
+Response: {{"compare": true, "items": [\
+{{"source": "pypi", "fields": {{"query": "fastapi"}}, "start": null, "end": null}}, \
+{{"source": "pypi", "fields": {{"query": "django"}}, "start": null, "end": null}}], \
+"resample": null, \
+"interpretation": "Comparing PyPI download counts for fastapi vs django"}}
+
+Query: "Seattle Sounders vs LA Galaxy xG this season"
+Response: {{"compare": true, "items": [\
+{{"source": "asa", "fields": {{"league": "mls", "entity_type": "teams", \
+"entity": "Seattle Sounders FC", "metric": "xgoals_for", "home_away": "all", \
+"stage": "regular"}}, "start": "{year}-01-01", "end": null}}, \
+{{"source": "asa", "fields": {{"league": "mls", "entity_type": "teams", \
+"entity": "LA Galaxy", "metric": "xgoals_for", "home_away": "all", \
+"stage": "regular"}}, "start": "{year}-01-01", "end": null}}], \
+"resample": null, \
+"interpretation": "Comparing expected goals for Seattle Sounders FC vs LA Galaxy \
+in MLS regular season this season"}}"""
 
 USER_PROMPT_TEMPLATE = """\
 Parse this natural language query into structured parameters.
@@ -257,6 +281,13 @@ Respond with JSON:
 "horizon": <integer>, "start": "<YYYY-MM-DD or null>", \
 "end": "<YYYY-MM-DD or null>", \
 "interpretation": "<one sentence explaining what you understood>"}}
+
+If the user wants to COMPARE multiple items, respond with:
+{{"compare": true, "items": [\
+{{"source": "<source>", "fields": {{...}}, "start": "<YYYY-MM-DD or null>", \
+"end": "<YYYY-MM-DD or null>"}}, ...], \
+"resample": "<frequency or null>", \
+"interpretation": "<one sentence>"}}
 
 If you cannot parse the query, respond with:
 {{"error": "<explanation>", "suggestions": ["<suggestion1>", "<suggestion2>"]}}"""
@@ -282,10 +313,54 @@ def _parse_date(value: str | None) -> datetime.date | None:
 # ---------------------------------------------------------------------------
 
 
+async def _handle_compare(
+    parsed: dict,
+) -> NaturalCompareResponse | NaturalQueryError:
+    """Handle compare-intent responses from the LLM."""
+    items_raw = parsed.get("items", [])
+    if len(items_raw) < 2 or len(items_raw) > 3:
+        return NaturalQueryError(
+            error="Compare requires 2-3 items",
+            suggestions=["Try 'compare X and Y'"],
+        )
+
+    resolved_items: list[NaturalCompareItem] = []
+    for item_data in items_raw:
+        source = item_data.get("source", "")
+        try:
+            registry.get(source)
+        except KeyError:
+            available = ", ".join(s.name for s in registry.list_sources())
+            return NaturalQueryError(
+                error=f"Unknown data source: '{source}'",
+                suggestions=[f"Available sources: {available}"],
+            )
+
+        fields = item_data.get("fields", {})
+        try:
+            resolved = await resolve_entities(source, fields)
+        except ValueError as e:
+            return NaturalQueryError(error=str(e))
+
+        query_string = build_query_string(source, resolved)
+        start = _parse_date(item_data.get("start"))
+        end = _parse_date(item_data.get("end"))
+
+        resolved_items.append(
+            NaturalCompareItem(source=source, query=query_string, start=start, end=end)
+        )
+
+    return NaturalCompareResponse(
+        items=resolved_items,
+        resample=parsed.get("resample"),
+        interpretation=parsed.get("interpretation", ""),
+    )
+
+
 async def parse_and_resolve(
     text: str,
     client: LLMClient | None = None,
-) -> NaturalQueryResponse | NaturalQueryError:
+) -> NaturalQueryResponse | NaturalCompareResponse | NaturalQueryError:
     """Full pipeline: parse natural language, resolve entities, build query."""
     llm = _get_client(client)
 
@@ -315,14 +390,18 @@ async def parse_and_resolve(
             suggestions=["Try rephrasing your query more specifically"],
         )
 
-    # 4. Check for LLM-reported error
+    # 4. Check for compare intent
+    if parsed.get("compare"):
+        return await _handle_compare(parsed)
+
+    # 5. Check for LLM-reported error
     if "error" in parsed:
         return NaturalQueryError(
             error=parsed["error"],
             suggestions=parsed.get("suggestions", []),
         )
 
-    # 5. Validate source exists
+    # 6. Validate source exists
     source = parsed.get("source", "")
     try:
         registry.get(source)
@@ -333,17 +412,17 @@ async def parse_and_resolve(
             suggestions=[f"Available sources: {available}"],
         )
 
-    # 6. Resolve entities (autocomplete fields)
+    # 7. Resolve entities (autocomplete fields)
     fields = parsed.get("fields", {})
     try:
         resolved = await resolve_entities(source, fields)
     except ValueError as e:
         return NaturalQueryError(error=str(e))
 
-    # 7. Build final query string
+    # 8. Build final query string
     query_string = build_query_string(source, resolved)
 
-    # 8. Parse dates
+    # 9. Parse dates
     start = _parse_date(parsed.get("start"))
     end = _parse_date(parsed.get("end"))
 

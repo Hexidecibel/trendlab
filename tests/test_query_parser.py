@@ -9,6 +9,7 @@ import pytest
 from app.ai.query_parser import (
     _extract_json,
     _find_best_match,
+    _handle_compare,
     build_catalog_prompt,
     build_query_string,
     parse_and_resolve,
@@ -16,6 +17,7 @@ from app.ai.query_parser import (
 )
 from app.models.schemas import (
     LookupItem,
+    NaturalCompareResponse,
     NaturalQueryError,
     NaturalQueryResponse,
 )
@@ -408,3 +410,266 @@ class TestParseAndResolve:
         assert str(result.start) == "2026-01-01"
         assert str(result.end) == "2026-06-30"
         assert result.horizon == 30
+
+
+class TestHandleCompare:
+    """Tests for _handle_compare helper."""
+
+    @pytest.mark.asyncio
+    async def test_valid_two_item_compare(self):
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "pypi",
+                    "fields": {"query": "fastapi"},
+                    "start": None,
+                    "end": None,
+                },
+                {
+                    "source": "pypi",
+                    "fields": {"query": "django"},
+                    "start": None,
+                    "end": None,
+                },
+            ],
+            "resample": None,
+            "interpretation": "Comparing fastapi vs django",
+        }
+        result = await _handle_compare(parsed)
+        assert isinstance(result, NaturalCompareResponse)
+        assert len(result.items) == 2
+        assert result.items[0].query == "fastapi"
+        assert result.items[1].query == "django"
+        assert result.interpretation == "Comparing fastapi vs django"
+
+    @pytest.mark.asyncio
+    async def test_valid_three_item_compare(self):
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "pypi",
+                    "fields": {"query": "fastapi"},
+                    "start": None,
+                    "end": None,
+                },
+                {
+                    "source": "pypi",
+                    "fields": {"query": "django"},
+                    "start": None,
+                    "end": None,
+                },
+                {
+                    "source": "pypi",
+                    "fields": {"query": "flask"},
+                    "start": None,
+                    "end": None,
+                },
+            ],
+            "resample": "week",
+            "interpretation": "Comparing three frameworks",
+        }
+        result = await _handle_compare(parsed)
+        assert isinstance(result, NaturalCompareResponse)
+        assert len(result.items) == 3
+        assert result.resample == "week"
+
+    @pytest.mark.asyncio
+    async def test_too_few_items(self):
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "pypi",
+                    "fields": {"query": "fastapi"},
+                    "start": None,
+                    "end": None,
+                }
+            ],
+            "interpretation": "Only one item",
+        }
+        result = await _handle_compare(parsed)
+        assert isinstance(result, NaturalQueryError)
+        assert "2-3 items" in result.error
+
+    @pytest.mark.asyncio
+    async def test_too_many_items(self):
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "pypi",
+                    "fields": {"query": f"pkg{i}"},
+                    "start": None,
+                    "end": None,
+                }
+                for i in range(4)
+            ],
+            "interpretation": "Four items",
+        }
+        result = await _handle_compare(parsed)
+        assert isinstance(result, NaturalQueryError)
+        assert "2-3 items" in result.error
+
+    @pytest.mark.asyncio
+    async def test_unknown_source(self):
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "nonexistent",
+                    "fields": {"query": "x"},
+                    "start": None,
+                    "end": None,
+                },
+                {
+                    "source": "pypi",
+                    "fields": {"query": "y"},
+                    "start": None,
+                    "end": None,
+                },
+            ],
+            "interpretation": "test",
+        }
+        result = await _handle_compare(parsed)
+        assert isinstance(result, NaturalQueryError)
+        assert "Unknown data source" in result.error
+
+    @pytest.mark.asyncio
+    async def test_entity_resolution_in_compare(self):
+        mock_adapter = MagicMock()
+        mock_adapter.form_fields.return_value = [
+            _field("league", "select"),
+            _field("entity_type", "select"),
+            _field("entity", "autocomplete", depends_on="league"),
+            _field("metric", "select"),
+            _field("home_away", "select"),
+            _field("stage", "select"),
+        ]
+        mock_adapter.lookup = AsyncMock(return_value=MOCK_LOOKUP_ITEMS)
+
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "asa",
+                    "fields": {
+                        "league": "mls",
+                        "entity_type": "teams",
+                        "entity": "Seattle Sounders FC",
+                        "metric": "xgoals_for",
+                        "home_away": "all",
+                        "stage": "all",
+                    },
+                    "start": None,
+                    "end": None,
+                },
+                {
+                    "source": "asa",
+                    "fields": {
+                        "league": "mls",
+                        "entity_type": "teams",
+                        "entity": "LA Galaxy",
+                        "metric": "xgoals_for",
+                        "home_away": "all",
+                        "stage": "all",
+                    },
+                    "start": None,
+                    "end": None,
+                },
+            ],
+            "interpretation": "Comparing two MLS teams",
+        }
+
+        with patch("app.ai.query_parser.registry") as mock_registry:
+            mock_registry.get.return_value = mock_adapter
+            result = await _handle_compare(parsed)
+
+        assert isinstance(result, NaturalCompareResponse)
+        assert "jYQJ19EqGR" in result.items[0].query
+        assert "kaDQ0wRqEv" in result.items[1].query
+
+    @pytest.mark.asyncio
+    async def test_date_parsing_in_compare(self):
+        parsed = {
+            "compare": True,
+            "items": [
+                {
+                    "source": "pypi",
+                    "fields": {"query": "fastapi"},
+                    "start": "2026-01-01",
+                    "end": None,
+                },
+                {
+                    "source": "pypi",
+                    "fields": {"query": "django"},
+                    "start": "2026-01-01",
+                    "end": None,
+                },
+            ],
+            "interpretation": "test",
+        }
+        result = await _handle_compare(parsed)
+        assert isinstance(result, NaturalCompareResponse)
+        assert str(result.items[0].start) == "2026-01-01"
+        assert result.items[0].end is None
+
+
+class TestParseAndResolveCompare:
+    """Tests for compare intent in parse_and_resolve."""
+
+    @pytest.mark.asyncio
+    async def test_compare_intent_dispatched(self):
+        llm_response = json.dumps(
+            {
+                "compare": True,
+                "items": [
+                    {
+                        "source": "pypi",
+                        "fields": {"query": "fastapi"},
+                        "start": None,
+                        "end": None,
+                    },
+                    {
+                        "source": "pypi",
+                        "fields": {"query": "django"},
+                        "start": None,
+                        "end": None,
+                    },
+                ],
+                "resample": None,
+                "interpretation": "Comparing fastapi vs django downloads",
+            }
+        )
+
+        mock_client = MagicMock()
+        mock_client.generate = AsyncMock(return_value=llm_response)
+
+        result = await parse_and_resolve("compare fastapi and django", mock_client)
+
+        assert isinstance(result, NaturalCompareResponse)
+        assert len(result.items) == 2
+        assert result.items[0].source == "pypi"
+
+    @pytest.mark.asyncio
+    async def test_single_series_still_works(self):
+        """Regression: single-series queries remain unaffected."""
+        llm_response = json.dumps(
+            {
+                "source": "pypi",
+                "fields": {"query": "fastapi"},
+                "horizon": 14,
+                "start": None,
+                "end": None,
+                "interpretation": "fastapi downloads",
+            }
+        )
+
+        mock_client = MagicMock()
+        mock_client.generate = AsyncMock(return_value=llm_response)
+
+        result = await parse_and_resolve("fastapi downloads", mock_client)
+
+        assert isinstance(result, NaturalQueryResponse)
+        assert result.source == "pypi"

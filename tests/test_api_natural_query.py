@@ -7,7 +7,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models.schemas import NaturalQueryError, NaturalQueryResponse
+from app.models.schemas import (
+    NaturalCompareItem,
+    NaturalCompareResponse,
+    NaturalQueryError,
+    NaturalQueryResponse,
+)
 
 
 @pytest.fixture
@@ -123,3 +128,36 @@ class TestNaturalQueryEndpoint:
         assert "interpretation" in data
         assert "start" in data
         assert "end" in data
+
+    @pytest.mark.asyncio
+    async def test_compare_query_returns_items(self, client):
+        mock_result = NaturalCompareResponse(
+            items=[
+                NaturalCompareItem(source="pypi", query="fastapi"),
+                NaturalCompareItem(source="pypi", query="django"),
+            ],
+            resample=None,
+            interpretation="Comparing fastapi vs django",
+        )
+
+        with (
+            patch("app.routers.api.settings") as mock_settings,
+            patch(
+                "app.routers.api.parse_and_resolve", new_callable=AsyncMock
+            ) as mock_parse,
+        ):
+            mock_settings.anthropic_api_key = "test-key"
+            mock_parse.return_value = mock_result
+
+            response = await client.post(
+                "/api/natural-query",
+                json={"text": "compare fastapi and django"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert len(data["items"]) == 2
+        assert data["items"][0]["source"] == "pypi"
+        assert data["items"][0]["query"] == "fastapi"
+        assert data["interpretation"] == "Comparing fastapi vs django"

@@ -6,6 +6,8 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Link from '@mui/material/Link'
 import TextField from '@mui/material/TextField'
 import { parseNaturalQuery } from '../api/client'
+import { isCompareResult } from '../api/types'
+import type { NaturalCompareItem } from '../api/types'
 
 interface Props {
   loading: boolean
@@ -16,9 +18,14 @@ interface Props {
     start?: string,
     end?: string,
   ) => void
+  onCompareResult?: (
+    items: NaturalCompareItem[],
+    interpretation: string,
+    resample?: string,
+  ) => void
 }
 
-export function NaturalQueryInput({ loading, onResult }: Props) {
+export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props) {
   const [text, setText] = useState('')
   const [parsing, setParsing] = useState(false)
   const [interpretation, setInterpretation] = useState('')
@@ -37,13 +44,21 @@ export function NaturalQueryInput({ loading, onResult }: Props) {
     try {
       const result = await parseNaturalQuery(text.trim())
       setInterpretation(result.interpretation)
-      onResult(
-        result.source,
-        result.query,
-        result.horizon,
-        result.start ?? undefined,
-        result.end ?? undefined,
-      )
+      if (isCompareResult(result)) {
+        onCompareResult?.(
+          result.items,
+          result.interpretation,
+          result.resample ?? undefined,
+        )
+      } else {
+        onResult(
+          result.source,
+          result.query,
+          result.horizon,
+          result.start ?? undefined,
+          result.end ?? undefined,
+        )
+      }
     } catch (err: unknown) {
       const detail = (err as { detail?: { error?: string; suggestions?: string[] } })?.detail
       if (detail?.error) {
@@ -73,7 +88,7 @@ export function NaturalQueryInput({ loading, onResult }: Props) {
             size="small"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Ask anything... e.g., 'Show me Bitcoin price trend' or 'Seattle Sounders xG at home'"
+            placeholder="Ask anything... e.g., 'Compare Bitcoin and Ethereum' or 'Seattle Sounders xG at home'"
             disabled={parsing}
           />
           <Button

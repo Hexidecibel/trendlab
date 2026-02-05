@@ -249,6 +249,19 @@ class NaturalQueryError(BaseModel):
     suggestions: list[str] = Field(default_factory=list)
 
 
+class NaturalCompareItem(BaseModel):
+    source: str
+    query: str
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+
+
+class NaturalCompareResponse(BaseModel):
+    items: list[NaturalCompareItem] = Field(..., min_length=2, max_length=3)
+    resample: str | None = None
+    interpretation: str
+
+
 # --- Saved Views models ---
 
 
