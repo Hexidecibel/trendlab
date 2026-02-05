@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Autocomplete from '@mui/material/Autocomplete'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -16,10 +16,15 @@ import CloseIcon from '@mui/icons-material/Close'
 import type { CompareItem, DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
 
+export interface ComparePrefill {
+  items: { source: string; query: string }[]
+}
+
 interface Props {
   sources: DataSourceInfo[]
   loading: boolean
   onSubmit: (items: CompareItem[]) => void
+  prefill?: ComparePrefill | null
 }
 
 interface Slot {
@@ -31,10 +36,40 @@ function emptySlot(): Slot {
   return { source: '', fieldValues: {} }
 }
 
-export function CompareForm({ sources, loading, onSubmit }: Props) {
+function decomposeQuery(query: string, formFields: FormField[]): Record<string, string> {
+  if (formFields.length === 0) return {}
+  if (formFields.length === 1 && formFields[0].name === 'query') {
+    return { query }
+  }
+  const parts = query.split(':')
+  const values: Record<string, string> = {}
+  formFields.forEach((f, i) => {
+    values[f.name] = parts[i] || ''
+  })
+  return values
+}
+
+export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
   const [slots, setSlots] = useState<Slot[]>([emptySlot(), emptySlot()])
   const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
   const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
+  const [lastPrefill, setLastPrefill] = useState<ComparePrefill | null>(null)
+  const prefillRef = useRef(false)
+
+  // Apply prefill when it changes
+  useEffect(() => {
+    if (!prefill || prefill === lastPrefill) return
+    setLastPrefill(prefill)
+    prefillRef.current = true
+    const newSlots: Slot[] = prefill.items.map((item) => {
+      const src = sources.find((s) => s.name === item.source)
+      const fieldValues = src ? decomposeQuery(item.query, src.form_fields) : {}
+      return { source: item.source, fieldValues }
+    })
+    // Pad to at least 2 slots
+    while (newSlots.length < 2) newSlots.push(emptySlot())
+    setSlots(newSlots)
+  }, [prefill, lastPrefill, sources])
 
   const updateSlot = (index: number, update: Partial<Slot>) => {
     setSlots((prev) => prev.map((s, i) => (i === index ? { ...s, ...update } : s)))

@@ -14,7 +14,9 @@ import { fetchCompare } from '../api/client'
 import type { CompareItem, NaturalCompareItem, TimeSeries } from '../api/types'
 import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
+import type { QueryPrefill } from './QueryForm'
 import { CompareForm } from './CompareForm'
+import type { ComparePrefill } from './CompareForm'
 import { ForecastChart } from './charts/ForecastChart'
 import { CompareChart } from './charts/CompareChart'
 import { ModelSelector } from './ModelSelector'
@@ -34,12 +36,19 @@ export function Dashboard() {
   const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
+  const [queryPrefill, setQueryPrefill] = useState<QueryPrefill | null>(null)
+  const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
 
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string) => {
     setActiveTab('explore')
     setLastQuery({ source, query, horizon })
     setSelectedModel('')
     loadData(source, query, horizon, start, end)
+  }
+
+  const handleNlExplore = (source: string, query: string, horizon: number, start?: string, end?: string) => {
+    setQueryPrefill({ source, query, horizon, start, end })
+    handleSubmit(source, query, horizon, start, end)
   }
 
   const handleCompare = async (items: CompareItem[]) => {
@@ -62,6 +71,9 @@ export function Dashboard() {
     _resample?: string,
   ) => {
     setActiveTab('compare')
+    setComparePrefill({
+      items: items.map((i) => ({ source: i.source, query: i.query })),
+    })
     const compareItems: CompareItem[] = items.map((i) => ({
       source: i.source,
       query: i.query,
@@ -80,7 +92,7 @@ export function Dashboard() {
     <Box>
       <NaturalQueryInput
         loading={loading || compareLoading}
-        onResult={handleSubmit}
+        onResult={handleNlExplore}
         onCompareResult={handleNlCompare}
       />
 
@@ -105,6 +117,7 @@ export function Dashboard() {
             sources={sources}
             loading={loading}
             onSubmit={handleSubmit}
+            prefill={queryPrefill}
           />
 
           {error && (
@@ -207,6 +220,7 @@ export function Dashboard() {
             sources={sources}
             loading={compareLoading}
             onSubmit={handleCompare}
+            prefill={comparePrefill}
           />
 
           {compareError && (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Autocomplete from '@mui/material/Autocomplete'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -13,13 +13,35 @@ import TextField from '@mui/material/TextField'
 import type { DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
 
+export interface QueryPrefill {
+  source: string
+  query: string
+  horizon: number
+  start?: string
+  end?: string
+}
+
 interface Props {
   sources: DataSourceInfo[]
   loading: boolean
   onSubmit: (source: string, query: string, horizon: number, start?: string, end?: string) => void
+  prefill?: QueryPrefill | null
 }
 
-export function QueryForm({ sources, loading, onSubmit }: Props) {
+function decomposeQuery(query: string, formFields: FormField[]): Record<string, string> {
+  if (formFields.length === 0) return {}
+  if (formFields.length === 1 && formFields[0].name === 'query') {
+    return { query }
+  }
+  const parts = query.split(':')
+  const values: Record<string, string> = {}
+  formFields.forEach((f, i) => {
+    values[f.name] = parts[i] || ''
+  })
+  return values
+}
+
+export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
   const [source, setSource] = useState('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [horizon, setHorizon] = useState(14)
@@ -28,11 +50,36 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
   const [showDateRange, setShowDateRange] = useState(false)
   const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
   const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
+  const [lastPrefill, setLastPrefill] = useState<QueryPrefill | null>(null)
+  const prefillRef = useRef(false)
 
   const selectedSource = sources.find((s) => s.name === source)
   const formFields = selectedSource?.form_fields || []
 
+  // Apply prefill when it changes
   useEffect(() => {
+    if (!prefill || prefill === lastPrefill) return
+    setLastPrefill(prefill)
+    prefillRef.current = true
+    setSource(prefill.source)
+    setHorizon(prefill.horizon)
+    if (prefill.start || prefill.end) {
+      setStartDate(prefill.start || '')
+      setEndDate(prefill.end || '')
+      setShowDateRange(true)
+    }
+    // Decompose query into field values using the target source's form fields
+    const targetSource = sources.find((s) => s.name === prefill.source)
+    if (targetSource) {
+      setFieldValues(decomposeQuery(prefill.query, targetSource.form_fields))
+    }
+  }, [prefill, lastPrefill, sources])
+
+  useEffect(() => {
+    if (prefillRef.current) {
+      prefillRef.current = false
+      return
+    }
     setFieldValues({})
   }, [source])
 
