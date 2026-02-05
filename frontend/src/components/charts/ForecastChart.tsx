@@ -1,13 +1,23 @@
 import { Line } from 'react-chartjs-2'
-import type { TimeSeries, ForecastComparison } from '../../api/types'
+import type { TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
 
 interface Props {
   series: TimeSeries
   forecast: ForecastComparison
   selectedModel: string
+  analysis?: TrendAnalysis | null
+  showBreaks?: boolean
+  showAnomalies?: boolean
 }
 
-export function ForecastChart({ series, forecast, selectedModel }: Props) {
+export function ForecastChart({
+  series,
+  forecast,
+  selectedModel,
+  analysis,
+  showBreaks = true,
+  showAnomalies = true,
+}: Props) {
   const modelForecast = forecast.forecasts.find(
     (f) => f.model_name === selectedModel,
   )
@@ -66,6 +76,44 @@ export function ForecastChart({ series, forecast, selectedModel }: Props) {
     ],
   }
 
+  // Build annotation config from analysis data
+  const annotations: Record<string, object> = {}
+
+  if (analysis && showBreaks) {
+    analysis.structural_breaks.forEach((brk, i) => {
+      annotations[`break-${i}`] = {
+        type: 'line',
+        xMin: brk.date,
+        xMax: brk.date,
+        borderColor: 'rgba(239, 68, 68, 0.7)',
+        borderWidth: 2,
+        borderDash: [6, 4],
+        label: {
+          display: true,
+          content: `Break (${brk.method})`,
+          position: 'start',
+          backgroundColor: 'rgba(239, 68, 68, 0.8)',
+          color: '#fff',
+          font: { size: 10 },
+        },
+      }
+    })
+  }
+
+  if (analysis && showAnomalies) {
+    analysis.anomalies.anomalies.forEach((a, i) => {
+      annotations[`anomaly-${i}`] = {
+        type: 'point',
+        xValue: a.date,
+        yValue: a.value,
+        radius: 5,
+        backgroundColor: 'rgba(239, 68, 68, 0.4)',
+        borderColor: 'rgb(239, 68, 68)',
+        borderWidth: 2,
+      }
+    })
+  }
+
   const options = {
     responsive: true,
     maintainAspectRatio: false,
@@ -95,6 +143,9 @@ export function ForecastChart({ series, forecast, selectedModel }: Props) {
           drag: { enabled: true },
           mode: 'x' as const,
         },
+      },
+      annotation: {
+        annotations,
       },
     },
   }

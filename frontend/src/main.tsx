@@ -12,6 +12,7 @@ import {
   Legend,
 } from 'chart.js'
 import zoomPlugin from 'chartjs-plugin-zoom'
+import annotationPlugin from 'chartjs-plugin-annotation'
 import 'chartjs-adapter-date-fns'
 import './index.css'
 import App from './App'
@@ -26,6 +27,7 @@ ChartJS.register(
   Tooltip,
   Legend,
   zoomPlugin,
+  annotationPlugin,
 )
 
 createRoot(document.getElementById('root')!).render(

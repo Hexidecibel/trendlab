@@ -13,6 +13,8 @@ export function Dashboard() {
     useApi()
   const [selectedModel, setSelectedModel] = useState('')
   const [lastQuery, setLastQuery] = useState({ source: '', query: '', horizon: 14 })
+  const [showBreaks, setShowBreaks] = useState(true)
+  const [showAnomalies, setShowAnomalies] = useState(true)
 
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string) => {
     setLastQuery({ source, query, horizon })
@@ -74,7 +76,30 @@ export function Dashboard() {
                 series={series}
                 forecast={forecast}
                 selectedModel={effectiveModel}
+                analysis={analysis}
+                showBreaks={showBreaks}
+                showAnomalies={showAnomalies}
               />
+              <div className="flex items-center gap-4 text-sm text-gray-600">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showBreaks}
+                    onChange={(e) => setShowBreaks(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Structural breaks
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showAnomalies}
+                    onChange={(e) => setShowAnomalies(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  Anomalies
+                </label>
+              </div>
               <EvaluationTable
                 evaluations={forecast.evaluations}
                 recommended={forecast.recommended_model}
