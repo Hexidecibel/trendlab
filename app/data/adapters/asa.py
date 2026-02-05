@@ -1,5 +1,6 @@
 """American Soccer Analysis adapter — team metrics for MLS, NWSL, USL."""
 
+import asyncio
 import datetime
 
 import httpx
@@ -15,6 +16,27 @@ from app.models.schemas import (
 )
 
 logger = get_logger(__name__)
+
+# Rate limit ASA API requests - only one at a time with delay between
+_asa_lock = asyncio.Lock()
+_asa_last_request = 0.0
+_ASA_REQUEST_DELAY = 0.5  # seconds between requests
+
+
+async def _rate_limited_get(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """Make a rate-limited GET request to ASA API."""
+    global _asa_last_request
+    async with _asa_lock:
+        # Wait if needed to respect rate limit
+        import time
+        now = time.time()
+        elapsed = now - _asa_last_request
+        if elapsed < _ASA_REQUEST_DELAY:
+            await asyncio.sleep(_ASA_REQUEST_DELAY - elapsed)
+
+        response = await client.get(url, **kwargs)
+        _asa_last_request = time.time()
+        return response
 
 ASA_API_URL = "https://app.americansocceranalysis.com/api/v1"
 
@@ -138,7 +160,7 @@ class ASAAdapter(DataAdapter):
     async def _lookup_teams(self, league: str) -> list[LookupItem]:
         url = f"{ASA_API_URL}/{league}/teams"
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=15.0)
+            response = await _rate_limited_get(client, url, timeout=15.0)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError:
@@ -244,7 +266,7 @@ class ASAAdapter(DataAdapter):
         params = {"team_id": team_id}
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, timeout=30.0)
+            response = await _rate_limited_get(client, url, params=params, timeout=30.0)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError:
@@ -294,7 +316,7 @@ class ASAAdapter(DataAdapter):
         }
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, timeout=30.0)
+            response = await _rate_limited_get(client, url, params=params, timeout=30.0)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError:

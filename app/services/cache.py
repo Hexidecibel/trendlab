@@ -69,12 +69,15 @@ class CachedFetcher:
             ts = await adapter.fetch(query, start=start, end=end)
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-            # Retry once if empty (API may have transient issues)
-            if not ts.points:
-                log.info("Empty response, retrying once")
-                await asyncio.sleep(0.5)
+            # Retry up to 3 times if empty (ASA API needs longer delays)
+            retries = 0
+            while not ts.points and retries < 3:
+                retries += 1
+                delay = retries * 1.0  # 1s, 2s, 3s
+                log.info("Empty response, retry %d after %.1fs", retries, delay)
+                await asyncio.sleep(delay)
                 ts = await adapter.fetch(query, start=start, end=end)
-                elapsed_ms = (time.perf_counter() - start_time) * 1000
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
 
             log.with_fields(fetch_ms=round(elapsed_ms, 2), data_points=len(ts.points)).info(
                 "Fetched from source"
