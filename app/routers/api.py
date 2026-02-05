@@ -11,6 +11,7 @@ from app.analysis.correlation import correlate as run_correlate
 from app.analysis.engine import analyze
 from app.config import settings
 from app.data.registry import registry
+from app.db import repository as repo
 from app.forecasting.engine import forecast
 from app.models.schemas import (
     CompareRequest,
@@ -23,6 +24,8 @@ from app.models.schemas import (
     NaturalQueryError,
     NaturalQueryRequest,
     NaturalQueryResponse,
+    SavedViewResponse,
+    SaveViewRequest,
     TimeSeries,
     TrendAnalysis,
 )
@@ -257,6 +260,45 @@ async def correlate_series(request: CorrelateRequest):
         return run_correlate(series_list[0], series_list[1])
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/views", response_model=SavedViewResponse, status_code=201)
+async def create_view(request: SaveViewRequest):
+    """Save a view configuration and return a shareable hash."""
+    return await repo.save_view(
+        name=request.name,
+        source=request.source,
+        query=request.query,
+        horizon=request.horizon,
+        start_date=request.start,
+        end_date=request.end,
+        resample=request.resample,
+        apply=request.apply,
+        anomaly_method=request.anomaly_method,
+    )
+
+
+@router.get("/views", response_model=list[SavedViewResponse])
+async def get_views():
+    """List all saved views."""
+    return await repo.list_views()
+
+
+@router.get("/views/{hash_id}", response_model=SavedViewResponse)
+async def get_view(hash_id: str):
+    """Get a saved view by its hash ID."""
+    view = await repo.get_view_by_hash(hash_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
+    return view
+
+
+@router.delete("/views/{hash_id}", status_code=204)
+async def delete_view(hash_id: str):
+    """Delete a saved view."""
+    deleted = await repo.delete_view(hash_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="View not found")
 
 
 @router.get("/insight")

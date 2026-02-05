@@ -80,3 +80,20 @@ class QueryConfig(Base):
     end_date = Column(Date)
     params_json = Column(Text)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class SavedView(Base):
+    __tablename__ = "saved_views"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hash_id = Column(String(12), unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    source = Column(String, nullable=False)
+    query = Column(String, nullable=False)
+    horizon = Column(Integer, default=14)
+    start_date = Column(Date)
+    end_date = Column(Date)
+    resample = Column(String)
+    apply = Column(String)
+    anomaly_method = Column(String, default="zscore")
+    created_at = Column(DateTime, nullable=False, default=_utcnow)

@@ -564,7 +564,7 @@ def correlate(
 ## Tier 3: UX & Polish
 
 ### Item 8: Saved Views / Shareable URLs
-**Status:** planned
+**Status:** done
 **Tier:** 3 — UX & Polish
 
 #### Requirements

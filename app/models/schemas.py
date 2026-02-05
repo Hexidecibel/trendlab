@@ -247,3 +247,32 @@ class NaturalQueryResponse(BaseModel):
 class NaturalQueryError(BaseModel):
     error: str
     suggestions: list[str] = Field(default_factory=list)
+
+
+# --- Saved Views models ---
+
+
+class SaveViewRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    source: str
+    query: str
+    horizon: int = 14
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    resample: str | None = None
+    apply: str | None = None
+    anomaly_method: str = "zscore"
+
+
+class SavedViewResponse(BaseModel):
+    hash_id: str
+    name: str
+    source: str
+    query: str
+    horizon: int
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    resample: str | None = None
+    apply: str | None = None
+    anomaly_method: str
+    created_at: datetime.datetime

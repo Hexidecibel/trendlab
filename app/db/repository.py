@@ -1,13 +1,21 @@
 import datetime
+import hashlib
 import json
 
 from sqlalchemy import select
 
 import app.db.engine as _engine_mod
-from app.db.models import AnalysisRecord, ForecastRecord, QueryConfig, SeriesRecord
+from app.db.models import (
+    AnalysisRecord,
+    ForecastRecord,
+    QueryConfig,
+    SavedView,
+    SeriesRecord,
+)
 from app.models.schemas import (
     DataPoint,
     ForecastComparison,
+    SavedViewResponse,
     TimeSeries,
     TrendAnalysis,
 )
@@ -214,3 +222,94 @@ async def get_query_config(config_id: int) -> dict | None:
             "params": json.loads(record.params_json) if record.params_json else {},
             "created_at": record.created_at,
         }
+
+
+# --- Saved Views ---
+
+
+def _generate_hash(source: str, query: str) -> str:
+    """Generate a short hash ID from source, query, and current timestamp."""
+    raw = f"{source}:{query}:{datetime.datetime.now(datetime.UTC).isoformat()}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:8]
+
+
+def _view_to_response(record: SavedView) -> SavedViewResponse:
+    return SavedViewResponse(
+        hash_id=record.hash_id,
+        name=record.name,
+        source=record.source,
+        query=record.query,
+        horizon=record.horizon,
+        start=record.start_date,
+        end=record.end_date,
+        resample=record.resample,
+        apply=record.apply,
+        anomaly_method=record.anomaly_method,
+        created_at=record.created_at,
+    )
+
+
+async def save_view(
+    name: str,
+    source: str,
+    query: str,
+    horizon: int = 14,
+    start_date: datetime.date | None = None,
+    end_date: datetime.date | None = None,
+    resample: str | None = None,
+    apply: str | None = None,
+    anomaly_method: str = "zscore",
+) -> SavedViewResponse:
+    """Save a view config and return the response with hash_id."""
+    hash_id = _generate_hash(source, query)
+
+    async with _engine_mod.async_session() as session:
+        record = SavedView(
+            hash_id=hash_id,
+            name=name,
+            source=source,
+            query=query,
+            horizon=horizon,
+            start_date=start_date,
+            end_date=end_date,
+            resample=resample,
+            apply=apply,
+            anomaly_method=anomaly_method,
+        )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        return _view_to_response(record)
+
+
+async def get_view_by_hash(hash_id: str) -> SavedViewResponse | None:
+    """Retrieve a saved view by hash_id, or None."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(SavedView).where(SavedView.hash_id == hash_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        return _view_to_response(record)
+
+
+async def list_views() -> list[SavedViewResponse]:
+    """List all saved views, newest first."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(SavedView).order_by(SavedView.created_at.desc())
+        result = await session.execute(stmt)
+        records = result.scalars().all()
+        return [_view_to_response(r) for r in records]
+
+
+async def delete_view(hash_id: str) -> bool:
+    """Delete a saved view by hash_id. Returns True if deleted."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(SavedView).where(SavedView.hash_id == hash_id)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return False
+        await session.delete(record)
+        await session.commit()
+        return True

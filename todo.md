@@ -29,7 +29,7 @@ The high-impact demos — what makes TrendLab compelling.
 
 Make it feel finished.
 
-- [planned] Saved views / shareable URLs: persist query config + results to DB, generate short URL or hash — load full view (series, analysis, forecast, annotations) from a single link
+- [x] Saved views / shareable URLs: persist query config + results to DB, generate short URL or hash — load full view (series, analysis, forecast, annotations) from a single link
 - [x] Add proper error handling and structured error responses across all endpoints
 - [planned] Frontend redesign — migrate to MUI (Material UI), better theme, better structuring/layout of data (currently functional but dense with a lot of information on screen)
 - [x] Add player-level queries to ASA adapter (xgoals, goals-added, xpass per player per game)
