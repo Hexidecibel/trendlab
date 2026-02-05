@@ -204,3 +204,357 @@ Period buckets:
 - Test aggregation integrates correctly with analysis engine (no crashes on shorter series)
 
 ---
+
+## Tier 2: Core Features
+
+### Item 4: Multi-Series Comparison
+**Status:** done
+**Tier:** 2 — Core Features
+
+#### Requirements
+- Compare 2–3 entities on the same chart (e.g. two MLS teams' xG, or Bitcoin vs Ethereum)
+- API endpoint accepts multiple series specs, returns all series in one response
+- Frontend overlays multiple series with distinct colors and legend
+- Each series can come from a different source (cross-source comparison)
+- Resample param applies uniformly to all series
+- NL parser support deferred to later — this is API + Frontend only
+
+#### API Design
+New endpoint: `POST /api/compare`
+
+Request body:
+```json
+{
+  "items": [
+    {"source": "crypto", "query": "bitcoin", "start": "2024-01-01", "end": "2024-12-31"},
+    {"source": "crypto", "query": "ethereum", "start": "2024-01-01", "end": "2024-12-31"}
+  ],
+  "resample": "week",
+  "apply": "normalize"
+}
+```
+
+Response model:
+```json
+{
+  "series": [
+    {"source": "crypto", "query": "bitcoin", "points": [...], "metadata": {...}},
+    {"source": "crypto", "query": "ethereum", "points": [...], "metadata": {...}}
+  ],
+  "count": 2
+}
+```
+
+POST because the request is structured (list of objects with optional fields). Max 3 items enforced server-side.
+
+#### Schemas (Pydantic)
+```python
+class CompareItem(BaseModel):
+    source: str
+    query: str
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+
+class CompareRequest(BaseModel):
+    items: list[CompareItem]  # 2-3 items
+    resample: str | None = None
+    apply: str | None = None   # from Item 5 (derived metrics)
+    refresh: bool = False
+
+class CompareResponse(BaseModel):
+    series: list[TimeSeries]
+    count: int
+```
+
+#### Files to Create/Modify
+- `app/models/schemas.py` — add CompareItem, CompareRequest, CompareResponse
+- `app/routers/api.py` — add `POST /compare` endpoint
+- `frontend/src/api/types.ts` — add CompareItem, CompareRequest, CompareResponse
+- `frontend/src/api/client.ts` — add `fetchCompare()` function
+- `frontend/src/components/charts/ForecastChart.tsx` — support multi-series overlay mode
+- `frontend/src/components/CompareForm.tsx` — new component: 2-3 query inputs side by side
+- `frontend/src/components/Dashboard.tsx` — add comparison mode toggle, wire up CompareForm
+- `frontend/src/hooks/useApi.ts` — add `loadCompare()` function and `compareResult` state
+
+#### Frontend Color Palette
+Series 1: blue (#3B82F6), Series 2: orange (#F97316), Series 3: green (#10B981). Each gets solid line for actual data. Use existing Chart.js multi-dataset support (already proven by actual + forecast + CI rendering).
+
+#### Implementation Steps
+1. Add Pydantic schemas for compare request/response
+2. Add `POST /compare` endpoint — validate 2-3 items, fetch all via CachedFetcher, apply resample/transforms, return
+3. Write backend tests (compare 2 series, compare 3 series, max items validation, mixed sources, resample applies to all)
+4. Add TypeScript types for compare
+5. Add `fetchCompare()` to API client
+6. Create CompareForm component with 2-3 query input rows
+7. Modify ForecastChart to accept optional `compareSeries` prop — renders multiple line datasets
+8. Wire comparison mode into Dashboard with toggle
+9. Write frontend smoke tests if applicable
+
+#### Tests Needed
+- Test compare with 2 same-source series
+- Test compare with 2 different-source series (cross-source)
+- Test compare with 3 series (max)
+- Test compare rejects >3 items or <2 items
+- Test resample applies to all series
+- Test refresh=true bypasses cache for all series
+- Test missing source returns 404
+- Test invalid query returns appropriate error
+
+---
+
+### Item 5: Derived Metrics / Computed Series
+**Status:** done
+**Tier:** 2 — Core Features
+
+#### Requirements
+- Transform series with `?apply=rolling_avg_7d|pct_change|cumulative|normalize` query param
+- Pipe-delimited chain of transforms, applied left to right
+- Applied after fetch + resample, before analysis/forecast
+- Essential for cross-source comparison (normalize puts different scales on [0,1])
+- No new adapters needed — pure data transformations
+
+#### Supported Transforms
+| Transform | Description | Example |
+|-----------|-------------|---------|
+| `rolling_avg_Nd` | N-day rolling average | `rolling_avg_7d`, `rolling_avg_30d` |
+| `pct_change` | Period-over-period % change | `(v[i] - v[i-1]) / v[i-1] * 100` |
+| `cumulative` | Running cumulative sum | Good for total downloads |
+| `normalize` | Min-max scale to [0, 1] | Required for cross-source comparison |
+| `diff` | First difference | `v[i] - v[i-1]` |
+
+#### Pipeline Design
+```python
+def apply_transforms(ts: TimeSeries, apply_str: str) -> TimeSeries:
+    """Parse pipe-delimited transform string and apply in order."""
+    for name in apply_str.split("|"):
+        ts = TRANSFORMS[name](ts)
+    return ts
+```
+
+Each transform is a pure function `(TimeSeries) -> TimeSeries`. Transforms that reduce length (rolling avg, pct_change, diff) drop leading NaN points.
+
+#### Files to Create/Modify
+- `app/services/transforms.py` — transform functions + `apply_transforms()` pipeline
+- `app/routers/api.py` — add `apply: str | None = Query(None)` to `/series`, `/analyze`, `/forecast`; apply after resample
+- `app/models/schemas.py` — (no changes needed; transforms go in metadata)
+
+#### Implementation Steps
+1. Create `app/services/transforms.py` with individual transform functions
+2. Implement `apply_transforms()` pipeline parser
+3. Add `apply` query param to `/series`, `/analyze`, `/forecast` endpoints
+4. Apply transforms in router: fetch → resample → apply → analyze/forecast
+5. Include applied transforms in metadata for frontend labeling
+6. Write tests
+
+#### Tests Needed
+- Test rolling_avg_7d: 14 points → 8 points (7 dropped), values are correct
+- Test rolling_avg_30d on short series: raises or returns empty gracefully
+- Test pct_change: known values produce correct percentages
+- Test pct_change handles zero values (division by zero → NaN dropped)
+- Test cumulative: known values produce running sum
+- Test normalize: output range is [0, 1], min maps to 0, max maps to 1
+- Test normalize with constant series (all same value) → handle gracefully
+- Test diff: first differences are correct
+- Test pipeline chaining: `normalize|rolling_avg_7d` applies both in order
+- Test empty apply string is no-op
+- Test unknown transform name raises ValueError
+- Test metadata includes applied transforms
+
+---
+
+### Item 6: Annotation Layer
+**Status:** done
+**Tier:** 2 — Core Features
+
+#### Requirements
+- Surface structural breaks and anomalies as visual annotations on the chart
+- Vertical lines at structural break dates with labels
+- Anomaly points highlighted with distinct markers
+- Use chartjs-plugin-annotation for vertical lines
+- Data comes from existing TrendAnalysis response — no new backend endpoint needed initially
+- Optional: manual annotations endpoint (deferred)
+
+#### Design Decisions
+- **No new backend endpoint** for v1 — structural breaks and anomalies are already in the TrendAnalysis response
+- Frontend reads `analysis.structural_breaks` and `analysis.anomalies.anomalies` to build annotations
+- chartjs-plugin-annotation draws vertical lines at break dates
+- Anomaly points get distinct markers (red circles) on the existing line
+- User can toggle annotations on/off
+
+#### Files to Create/Modify
+- `frontend/package.json` — add `chartjs-plugin-annotation` dependency
+- `frontend/src/main.tsx` — register annotation plugin with Chart.js
+- `frontend/src/components/charts/ForecastChart.tsx` — accept optional `analysis` prop, build annotation config from structural breaks + anomalies
+- `frontend/src/components/Dashboard.tsx` — pass analysis data to ForecastChart
+- `frontend/src/components/AnnotationToggle.tsx` — new small component: checkboxes for "Show breaks" / "Show anomalies"
+
+#### Chart.js Annotation Config
+```typescript
+// Structural break → vertical line
+{
+  type: 'line',
+  xMin: breakDate,
+  xMax: breakDate,
+  borderColor: 'rgba(239, 68, 68, 0.7)',  // red
+  borderWidth: 2,
+  borderDash: [6, 4],
+  label: {
+    display: true,
+    content: `Break (${method})`,
+    position: 'start'
+  }
+}
+
+// Anomaly → point annotation
+{
+  type: 'point',
+  xValue: anomalyDate,
+  yValue: anomalyValue,
+  radius: 6,
+  backgroundColor: 'rgba(239, 68, 68, 0.5)',
+  borderColor: 'rgb(239, 68, 68)'
+}
+```
+
+#### Implementation Steps
+1. Install `chartjs-plugin-annotation` in frontend
+2. Register plugin in `main.tsx`
+3. Add `analysis` prop to ForecastChart component
+4. Build annotation config from structural breaks (vertical lines)
+5. Build annotation config from anomaly points (highlighted markers)
+6. Add AnnotationToggle component with show/hide state
+7. Wire toggle state into Dashboard → ForecastChart
+8. Test visual rendering
+
+#### Tests Needed
+- Test annotation config generation from structural breaks
+- Test annotation config generation from anomalies
+- Test toggle state hides/shows annotations
+- Test empty analysis (no breaks, no anomalies) renders chart without errors
+- Visual smoke test: chart renders with annotations enabled
+
+---
+
+### Item 7: Cross-Source Correlation
+**Status:** done
+**Tier:** 2 — Core Features
+
+#### Requirements
+- Endpoint that takes two series, aligns them by date, and computes correlation statistics
+- Returns: Pearson r, Spearman ρ, p-values, lag analysis, and scatter plot data
+- "Does Bitcoin price correlate with crypto library downloads?"
+- Both series must be aligned to the same date range — inner join on dates
+- Supports optional resample to align series with different granularities
+
+#### API Design
+New endpoint: `POST /api/correlate`
+
+Request body:
+```json
+{
+  "series_a": {"source": "crypto", "query": "bitcoin"},
+  "series_b": {"source": "pypi", "query": "web3"},
+  "start": "2024-01-01",
+  "end": "2024-12-31",
+  "resample": "week"
+}
+```
+
+Response model:
+```json
+{
+  "series_a": {"source": "crypto", "query": "bitcoin"},
+  "series_b": {"source": "pypi", "query": "web3"},
+  "aligned_points": 52,
+  "pearson": {"r": 0.73, "p_value": 0.001},
+  "spearman": {"rho": 0.68, "p_value": 0.003},
+  "lag_analysis": [
+    {"lag": -7, "correlation": 0.45},
+    {"lag": 0, "correlation": 0.73},
+    {"lag": 7, "correlation": 0.61}
+  ],
+  "scatter": [
+    {"x": 42000.0, "y": 15234.0},
+    {"x": 43500.0, "y": 16100.0}
+  ]
+}
+```
+
+#### Schemas (Pydantic)
+```python
+class CorrelateRequest(BaseModel):
+    series_a: CompareItem
+    series_b: CompareItem
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    resample: str | None = None
+    refresh: bool = False
+
+class CorrelationCoefficient(BaseModel):
+    r: float        # or rho for Spearman
+    p_value: float
+
+class LagCorrelation(BaseModel):
+    lag: int         # positive = A leads B
+    correlation: float
+
+class ScatterPoint(BaseModel):
+    x: float         # series A value
+    y: float         # series B value
+
+class CorrelateResponse(BaseModel):
+    series_a_label: str   # "crypto:bitcoin"
+    series_b_label: str   # "pypi:web3"
+    aligned_points: int
+    pearson: CorrelationCoefficient
+    spearman: CorrelationCoefficient
+    lag_analysis: list[LagCorrelation]
+    scatter: list[ScatterPoint]
+```
+
+#### Correlation Engine
+```python
+def correlate(
+    ts_a: TimeSeries, ts_b: TimeSeries, max_lag: int = 30
+) -> CorrelateResponse:
+    # 1. Align: inner join on date
+    # 2. Pearson r via scipy.stats.pearsonr
+    # 3. Spearman ρ via scipy.stats.spearmanr
+    # 4. Lag analysis: shift one series by -max_lag..+max_lag, compute r at each
+    # 5. Scatter: zip aligned values
+```
+
+#### Files to Create/Modify
+- `app/models/schemas.py` — add CorrelateRequest, CorrelateResponse, CorrelationCoefficient, LagCorrelation, ScatterPoint
+- `app/analysis/correlation.py` — new module: `align_series()`, `correlate()`
+- `app/routers/api.py` — add `POST /correlate` endpoint
+- `frontend/src/api/types.ts` — add correlation types
+- `frontend/src/api/client.ts` — add `fetchCorrelation()` function
+- `frontend/src/components/charts/ScatterChart.tsx` — new chart component for scatter plot
+- `frontend/src/components/CorrelationPanel.tsx` — new component displaying r-values, lag chart, scatter
+
+#### Dependencies to Add
+- `scipy` — for `pearsonr`, `spearmanr` (check if already installed)
+
+#### Implementation Steps
+1. Check if scipy is available (may need to add to deps)
+2. Add Pydantic schemas for correlation request/response
+3. Create `app/analysis/correlation.py` with `align_series()` and `correlate()` functions
+4. Add `POST /correlate` endpoint to router
+5. Write backend tests
+6. Add TypeScript types and API client function
+7. Create ScatterChart component (Chart.js scatter type)
+8. Create CorrelationPanel component (stats display + lag chart)
+9. Wire into Dashboard (new tab or section)
+
+#### Tests Needed
+- Test align_series with overlapping date ranges
+- Test align_series with non-overlapping ranges (should error or return 0 points)
+- Test Pearson r on perfectly correlated data (r ≈ 1.0)
+- Test Pearson r on uncorrelated data (r ≈ 0.0)
+- Test Spearman ρ on monotonic data
+- Test lag analysis finds correct peak lag for shifted data
+- Test scatter output has correct x/y mapping
+- Test with resampled data (weekly alignment)
+- Test endpoint rejects if <2 aligned points
+- Test correlation with identical series (r = 1.0, ρ = 1.0)

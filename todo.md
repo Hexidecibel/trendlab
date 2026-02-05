@@ -18,10 +18,10 @@ Everything else builds on this.
 
 The high-impact demos — what makes TrendLab compelling.
 
-- [ ] Multi-series comparison: support comparing 2-3 teams/entities on the same chart (NL parser, /api/compare endpoint, dashboard overlay with legend)
-- [ ] Derived metrics / computed series: `?apply=rolling_avg_7d|pct_change|cumulative|normalize` param to transform series without new adapters — essential for meaningful cross-source comparisons
-- [ ] Annotation layer: mark events on the timeline (manual or LLM-detected), surface structural breaks as chart annotations, vertical lines with labels
-- [ ] Cross-source correlation: endpoint that takes two series, returns r-value, lag analysis, and scatter plot — "does Bitcoin price correlate with crypto library downloads?"
+- [x] Multi-series comparison: support comparing 2-3 teams/entities on the same chart (NL parser, /api/compare endpoint, dashboard overlay with legend)
+- [x] Derived metrics / computed series: `?apply=rolling_avg_7d|pct_change|cumulative|normalize` param to transform series without new adapters — essential for meaningful cross-source comparisons
+- [x] Annotation layer: mark events on the timeline (manual or LLM-detected), surface structural breaks as chart annotations, vertical lines with labels
+- [x] Cross-source correlation: endpoint that takes two series, returns r-value, lag analysis, and scatter plot — "does Bitcoin price correlate with crypto library downloads?"
 
 ---
 
