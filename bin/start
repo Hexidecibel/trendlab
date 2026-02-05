@@ -1,0 +1,25 @@
+#!/bin/bash
+# Start TrendLab Docker container (first time or after manual stop)
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+# Build if image doesn't exist
+if ! docker image inspect trendlab >/dev/null 2>&1; then
+  echo "Building Docker image..."
+  docker build -t trendlab .
+fi
+
+# Remove old container if exists
+docker stop trendlab 2>/dev/null || true
+docker rm trendlab 2>/dev/null || true
+
+echo "Starting TrendLab..."
+docker run -d --name trendlab \
+  -p 8080:8000 \
+  --env-file .env \
+  --restart unless-stopped \
+  trendlab
+
+echo "TrendLab is running at http://localhost:8080"

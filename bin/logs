@@ -1,0 +1,4 @@
+#!/bin/bash
+# View TrendLab logs
+
+docker logs -f trendlab --tail "${1:-50}"

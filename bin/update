@@ -1,0 +1,26 @@
+#!/bin/bash
+# Update and redeploy TrendLab Docker container
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+echo "Pulling latest changes..."
+git pull
+
+echo "Building Docker image..."
+docker build -t trendlab .
+
+echo "Stopping old container..."
+docker stop trendlab 2>/dev/null || true
+docker rm trendlab 2>/dev/null || true
+
+echo "Starting new container..."
+docker run -d --name trendlab \
+  -p 8080:8000 \
+  --env-file .env \
+  --restart unless-stopped \
+  trendlab
+
+echo "Done! TrendLab is running at http://localhost:8080"
+docker logs -f trendlab --tail 20

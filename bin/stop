@@ -1,0 +1,4 @@
+#!/bin/bash
+# Stop TrendLab Docker container
+
+docker stop trendlab 2>/dev/null && echo "TrendLab stopped" || echo "TrendLab not running"
