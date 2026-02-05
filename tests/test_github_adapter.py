@@ -167,3 +167,10 @@ class TestGitHubStarsAdapter:
     def test_adapter_metadata(self, adapter):
         assert adapter.name == "github_stars"
         assert "GitHub" in adapter.description
+
+    def test_form_fields_has_placeholder(self, adapter):
+        """Form fields should have a descriptive placeholder."""
+        fields = adapter.form_fields()
+        assert len(fields) == 1
+        assert fields[0].name == "query"
+        assert "owner/repo" in fields[0].placeholder.lower()

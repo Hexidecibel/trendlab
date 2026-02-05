@@ -770,7 +770,7 @@ class ErrorResponse(BaseModel):
 ---
 
 ### Item 12: Enhance Current Adapters
-**Status:** planned
+**Status:** done
 **Tier:** 3 — UX & Polish
 
 #### Requirements

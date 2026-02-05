@@ -5,9 +5,26 @@ import datetime
 import httpx
 
 from app.data.base import DataAdapter
-from app.models.schemas import DataPoint, FormField, TimeSeries
+from app.models.schemas import (
+    DataPoint,
+    FormField,
+    FormFieldOption,
+    LookupItem,
+    TimeSeries,
+)
 
-FOOTBALL_API_URL = "https://api.football-data.org/v4/competitions/{competition}/matches"
+FOOTBALL_API_BASE = "https://api.football-data.org/v4"
+FOOTBALL_API_URL = f"{FOOTBALL_API_BASE}/competitions/{{competition}}/matches"
+
+COMPETITIONS = [
+    ("PL", "Premier League"),
+    ("BL1", "Bundesliga"),
+    ("SA", "Serie A"),
+    ("PD", "La Liga"),
+    ("FL1", "Ligue 1"),
+    ("CL", "Champions League"),
+    ("ELC", "Championship"),
+]
 
 
 class FootballDataAdapter(DataAdapter):
@@ -20,11 +37,47 @@ class FootballDataAdapter(DataAdapter):
     def form_fields(self) -> list[FormField]:
         return [
             FormField(
-                name="query",
-                label="Competition/Team ID",
-                field_type="text",
-                placeholder="PL/66",
-            )
+                name="competition",
+                label="Competition",
+                field_type="select",
+                options=[
+                    FormFieldOption(value=code, label=name)
+                    for code, name in COMPETITIONS
+                ],
+            ),
+            FormField(
+                name="team",
+                label="Team",
+                field_type="autocomplete",
+                placeholder="Search teams...",
+                depends_on="competition",
+            ),
+        ]
+
+    async def lookup(
+        self, lookup_type: str, **kwargs: str
+    ) -> list[LookupItem]:
+        if lookup_type != "teams":
+            return []
+
+        competition = kwargs.get("competition", "PL")
+        url = f"{FOOTBALL_API_BASE}/competitions/{competition}/teams"
+        headers = {"X-Auth-Token": self._token}
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=15.0)
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                if response.status_code in (400, 404):
+                    raise ValueError(
+                        f"Competition '{competition}' not found"
+                    ) from None
+                raise
+
+        teams = response.json().get("teams", [])
+        return [
+            LookupItem(value=str(t["id"]), label=t["name"]) for t in teams
         ]
 
     async def fetch(

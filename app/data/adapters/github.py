@@ -4,7 +4,7 @@ from collections import Counter
 import httpx
 
 from app.data.base import DataAdapter
-from app.models.schemas import DataPoint, TimeSeries
+from app.models.schemas import DataPoint, FormField, TimeSeries
 
 GITHUB_API_URL = "https://api.github.com/repos/{owner_repo}/stargazers"
 
@@ -15,6 +15,16 @@ class GitHubStarsAdapter(DataAdapter):
 
     def __init__(self, token: str) -> None:
         self._token = token
+
+    def form_fields(self) -> list[FormField]:
+        return [
+            FormField(
+                name="query",
+                label="Repository",
+                field_type="text",
+                placeholder="owner/repo (e.g. fastapi/fastapi)",
+            )
+        ]
 
     async def fetch(
         self,

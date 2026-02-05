@@ -179,3 +179,55 @@ class TestFootballDataAdapter:
     def test_adapter_metadata(self, adapter):
         assert adapter.name == "football"
         assert "football" in adapter.description.lower()
+
+    def test_form_fields_include_competition_and_team(self, adapter):
+        """Form fields should include competition select and team autocomplete."""
+        fields = adapter.form_fields()
+        names = [f.name for f in fields]
+        assert "competition" in names
+        assert "team" in names
+
+    def test_form_fields_competition_has_options(self, adapter):
+        """Competition field should have standard league options."""
+        fields = adapter.form_fields()
+        comp = next(f for f in fields if f.name == "competition")
+        values = [o.value for o in comp.options]
+        assert "PL" in values  # Premier League
+        assert "BL1" in values  # Bundesliga
+        assert "SA" in values  # Serie A
+
+    def test_form_fields_team_depends_on_competition(self, adapter):
+        """Team field should depend on competition selection."""
+        fields = adapter.form_fields()
+        team = next(f for f in fields if f.name == "team")
+        assert team.depends_on == "competition"
+        assert team.field_type == "autocomplete"
+
+    @pytest.mark.asyncio
+    async def test_lookup_teams(self, adapter):
+        """lookup('teams') should return team list for a competition."""
+        mock_teams_response = {
+            "teams": [
+                {"id": 66, "name": "Manchester United FC"},
+                {"id": 57, "name": "Arsenal FC"},
+                {"id": 65, "name": "Manchester City FC"},
+            ]
+        }
+        mock_resp = _mock_response(json_data=mock_teams_response)
+        with patch("app.data.adapters.football.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.get.return_value = mock_resp
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            items = await adapter.lookup("teams", competition="PL")
+            assert len(items) == 3
+            assert items[0].label == "Manchester United FC"
+            assert items[0].value == "66"
+
+    @pytest.mark.asyncio
+    async def test_lookup_unknown_type(self, adapter):
+        """Unknown lookup type should return empty list."""
+        items = await adapter.lookup("stadiums")
+        assert items == []
