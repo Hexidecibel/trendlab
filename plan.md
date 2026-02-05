@@ -558,3 +558,246 @@ def correlate(
 - Test with resampled data (weekly alignment)
 - Test endpoint rejects if <2 aligned points
 - Test correlation with identical series (r = 1.0, ρ = 1.0)
+
+---
+
+## Tier 3: UX & Polish
+
+### Item 8: Saved Views / Shareable URLs
+**Status:** planned
+**Tier:** 3 — UX & Polish
+
+#### Requirements
+- Save current query config + params to DB, generate a short hash ID
+- Load full view from `/view/{hash}` URL — re-fetches data and renders chart/analysis/forecast
+- List saved views, delete views
+- Hash-based sharing: no auth, anyone with the link can load the view
+- Frontend needs react-router-dom for URL routing
+
+#### DB Model
+```python
+class SavedView(Base):
+    __tablename__ = "saved_views"
+    id = Column(Integer, primary_key=True)
+    hash_id = Column(String(12), unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    source = Column(String, nullable=False)
+    query = Column(String, nullable=False)
+    horizon = Column(Integer, default=14)
+    start_date = Column(Date)
+    end_date = Column(Date)
+    resample = Column(String)
+    apply = Column(String)
+    anomaly_method = Column(String, default="zscore")
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+```
+
+Hash generated from `hashlib.sha256(f"{source}:{query}:{timestamp}")[:8]` — short, URL-safe.
+
+#### API Endpoints
+- `POST /api/views` — save view, returns `{hash_id, name, ...}`
+- `GET /api/views` — list all saved views
+- `GET /api/views/{hash_id}` — get view config by hash
+- `DELETE /api/views/{hash_id}` — delete view
+
+#### Files to Create/Modify
+- `app/db/models.py` — add SavedView model
+- `app/db/repository.py` — add save_view, get_view_by_hash, list_views, delete_view
+- `app/models/schemas.py` — add SaveViewRequest, SavedViewResponse
+- `app/routers/api.py` — add 4 view endpoints
+- `frontend/package.json` — add react-router-dom
+- `frontend/src/main.tsx` — add BrowserRouter
+- `frontend/src/App.tsx` — add routes (/ and /view/:hash)
+- `frontend/src/api/client.ts` — add saveView, getView, listViews, deleteView
+- `frontend/src/api/types.ts` — add SavedView type
+- `frontend/src/components/Dashboard.tsx` — add save button, load from URL param
+- `frontend/src/components/SavedViewsList.tsx` — new component: list/load/delete views
+
+#### Implementation Steps
+1. Add SavedView ORM model with hash_id generation
+2. Add repository CRUD functions
+3. Add Pydantic request/response schemas
+4. Add API endpoints
+5. Write backend tests
+6. Install react-router-dom in frontend
+7. Add routing to App.tsx
+8. Add save/load/list UI components
+9. Wire Dashboard to load view from URL
+
+#### Tests Needed
+- Test save view returns hash_id
+- Test get view by hash returns correct config
+- Test list views returns all saved
+- Test delete view removes record
+- Test duplicate saves get different hashes
+- Test 404 for unknown hash
+- Test endpoint validation (name required, source required)
+
+---
+
+### Item 9: Structured Error Handling
+**Status:** done
+**Tier:** 3 — UX & Polish
+
+#### Requirements
+- Standardized error response model across all endpoints
+- Global exception handler for unhandled errors
+- Consistent HTTP status codes (400 for bad input, 404 for not found, 422 for validation, 503 for external service failure)
+- Fix ASA adapter missing try/except on HTTP calls
+- Fix ValueError → 404 mapping (should be 422 for validation errors)
+
+#### Error Response Model
+```python
+class ErrorResponse(BaseModel):
+    error: str           # Machine-readable error type
+    detail: str          # Human-readable message
+    status_code: int     # HTTP status code
+```
+
+#### Status Code Mapping
+| Scenario | Current | Correct |
+|----------|---------|---------|
+| Unknown source | 404 | 404 ✓ |
+| Adapter ValueError (bad query) | 404 | 422 |
+| Empty series | 404 | 422 |
+| Too few correlation points | 422 | 422 ✓ |
+| External API down | 500 (unhandled) | 503 |
+| Invalid transform name | 500 (unhandled) | 422 |
+| Missing API key | 503 | 503 ✓ |
+
+#### Files to Create/Modify
+- `app/models/schemas.py` — add ErrorResponse model
+- `app/main.py` — add global exception handlers (ValueError, httpx errors, catch-all)
+- `app/routers/api.py` — fix status codes for ValueError (404 → 422)
+- `app/data/adapters/asa.py` — add try/except around HTTP calls
+
+#### Implementation Steps
+1. Add ErrorResponse schema
+2. Add global exception handlers in main.py
+3. Fix ValueError status codes in api.py (404 → 422 for validation errors, keep 404 for "not found")
+4. Add error handling to ASA adapter HTTP calls
+5. Write tests for error responses
+6. Verify existing tests still pass
+
+#### Tests Needed
+- Test global handler catches unhandled exceptions → 500 with ErrorResponse format
+- Test ValueError from adapter → 422 (not 404)
+- Test unknown source → 404
+- Test ASA adapter HTTP error → proper ValueError
+- Test invalid transform → 422
+- Test invalid resample frequency → 422
+
+---
+
+### Item 10: Frontend Redesign (MUI)
+**Status:** planned
+**Tier:** 3 — UX & Polish
+
+#### Requirements
+- Migrate from raw Tailwind to Material UI (MUI) component library
+- Better visual hierarchy and layout
+- Less dense — currently all info on one screen
+- Consistent theme (colors, typography, spacing)
+- Keep all existing functionality intact
+
+#### Design Approach
+- MUI v6 (latest) with Emotion styling
+- Tabbed layout: "Explore" (single query), "Compare" (multi-series), "Correlate"
+- Sidebar for analysis details (collapsible)
+- Card-based layout for chart, model selector, evaluation
+- AppBar with title, theme toggle (light/dark)
+- Snackbar for errors/success messages
+
+#### Files to Create/Modify
+- `frontend/package.json` — add @mui/material, @mui/icons-material, @emotion/react, @emotion/styled
+- `frontend/src/App.tsx` — MUI ThemeProvider, CssBaseline
+- `frontend/src/components/Dashboard.tsx` — rewrite with MUI Grid, Tabs, Cards
+- `frontend/src/components/QueryForm.tsx` — MUI TextField, Select, Autocomplete
+- `frontend/src/components/NaturalQueryInput.tsx` — MUI TextField, Alert
+- `frontend/src/components/charts/ForecastChart.tsx` — wrap in MUI Card
+- `frontend/src/components/AnalysisPanel.tsx` — MUI Accordion, List, Chip
+- `frontend/src/components/ModelSelector.tsx` — MUI ToggleButtonGroup
+- `frontend/src/components/EvaluationTable.tsx` — MUI Table with sorting
+- `frontend/src/components/InsightPanel.tsx` — MUI Card, LinearProgress
+
+#### Implementation Steps
+1. Install MUI dependencies
+2. Set up ThemeProvider and CssBaseline in App.tsx
+3. Migrate components one at a time (start with layout → forms → panels → chart wrapper)
+4. Remove Tailwind CSS (or keep for minor utility; MUI handles layout)
+5. Test each component visually after migration
+6. Verify build passes
+
+#### Tests Needed
+- Frontend build compiles without errors
+- Visual smoke test of each major view
+
+---
+
+### Item 11: Player-Level ASA Queries
+**Status:** done
+**Tier:** 3 — UX & Polish
+
+#### Requirements
+- Add "players" option to ASA entity_type field
+- Implement player lookup per league
+- Player-level xgoals and xpass metrics via ASA API
+- Query format: `league:players:player_id:metric[:home_away:stage]`
+
+#### ASA Player API
+- Lookup: `GET /api/v1/{league}/players` → returns player_id, player_name
+- Metrics: `GET /api/v1/{league}/players/xgoals?player_id=X&split_by_games=true`
+- Metrics: `GET /api/v1/{league}/players/xpass?player_id=X&split_by_games=true`
+
+#### Files to Create/Modify
+- `app/data/adapters/asa.py` — add "players" to entity_type options, add `_lookup_players()`, update fetch to handle player_id param
+
+#### Implementation Steps
+1. Add "players" to entity_type form field options
+2. Implement `_lookup_players(league)` method
+3. Update `lookup()` to dispatch to `_lookup_players` when lookup_type == "players"
+4. Update `_fetch_metric_data()` — already uses player_id param when entity_type is players (line 280)
+5. Update form_fields entity placeholder based on entity_type
+6. Write tests
+
+#### Tests Needed
+- Test player lookup returns list of players
+- Test player query format is parsed correctly
+- Test player xgoals metric fetches and returns TimeSeries
+- Test player xpass metric fetches and returns TimeSeries
+- Test entity field depends_on entity_type change
+
+---
+
+### Item 12: Enhance Current Adapters
+**Status:** planned
+**Tier:** 3 — UX & Polish
+
+#### Requirements
+- Football adapter: add team/competition lookup and select fields
+- GitHub adapter: add form_fields() with proper text input
+- Review other adapters for enhancement opportunities
+
+#### Football Adapter Enhancements
+- Add `form_fields()` with competition select (Premier League, La Liga, etc.) and team autocomplete
+- Add `lookup()` for teams within a competition
+- Query format already works: `competition_id:team_id`
+
+#### GitHub Adapter Enhancements
+- Already has a text field via default form_fields()
+- Could add description/placeholder: "owner/repo format"
+
+#### Files to Create/Modify
+- `app/data/adapters/football.py` — add form_fields(), lookup()
+- `app/data/adapters/github.py` — override form_fields() for better placeholder
+
+#### Implementation Steps
+1. Add competition select and team autocomplete to football adapter form_fields()
+2. Implement football adapter lookup() for teams
+3. Update github adapter form_fields() with better placeholder
+4. Write tests
+
+#### Tests Needed
+- Test football form_fields returns competition and team fields
+- Test football lookup returns teams for a competition
+- Test github form_fields has descriptive placeholder
