@@ -2,8 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -62,6 +64,47 @@ app.add_middleware(
 )
 
 app.include_router(api.router, prefix="/api")
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(httpx.HTTPStatusError)
+async def http_status_error_handler(request: Request, exc: httpx.HTTPStatusError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"External API error: {exc.response.status_code}"},
+    )
+
+
+@app.exception_handler(httpx.ConnectError)
+async def connect_error_handler(request: Request, exc: httpx.ConnectError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "External service unavailable"},
+    )
+
+
+@app.exception_handler(httpx.TimeoutException)
+async def timeout_error_handler(request: Request, exc: httpx.TimeoutException):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "External service timeout"},
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.get("/health")

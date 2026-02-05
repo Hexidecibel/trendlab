@@ -147,7 +147,12 @@ class ASAAdapter(DataAdapter):
         url = f"{ASA_API_URL}/{league}/teams"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=15.0)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                if response.status_code in (400, 404):
+                    raise ValueError(f"League '{league}' not found on ASA") from None
+                raise
 
         teams = response.json()
         return [LookupItem(value=t["team_id"], label=t["team_name"]) for t in teams]
@@ -240,7 +245,14 @@ class ASAAdapter(DataAdapter):
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, timeout=30.0)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                if response.status_code in (400, 404):
+                    raise ValueError(
+                        f"Games not found for '{entity_id}' in {league}"
+                    ) from None
+                raise
 
         games = response.json()
         date_map: dict[str, datetime.date] = {}
@@ -285,6 +297,13 @@ class ASAAdapter(DataAdapter):
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, timeout=30.0)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                if response.status_code in (400, 404):
+                    raise ValueError(
+                        f"Metric data not found for '{entity_id}' in {league}"
+                    ) from None
+                raise
 
         return response.json()
