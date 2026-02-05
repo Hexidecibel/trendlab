@@ -1,4 +1,10 @@
 import { useState } from 'react'
+import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import CircularProgress from '@mui/material/CircularProgress'
+import Link from '@mui/material/Link'
+import TextField from '@mui/material/TextField'
 import { parseNaturalQuery } from '../api/client'
 
 interface Props {
@@ -59,56 +65,54 @@ export function NaturalQueryInput({ loading, onResult }: Props) {
   const isDisabled = loading || parsing || text.trim().length < 3
 
   return (
-    <div className="mb-6">
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Ask anything... e.g., 'Show me Bitcoin price trend' or 'Seattle Sounders xG at home'"
-          className="flex-1 border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          disabled={parsing}
-        />
-        <button
-          type="submit"
-          disabled={isDisabled}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-        >
-          {parsing ? (
-            <>
-              <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-              Parsing...
-            </>
-          ) : (
-            'Ask'
-          )}
-        </button>
+    <Box sx={{ mb: 3 }}>
+      <form onSubmit={handleSubmit}>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <TextField
+            fullWidth
+            size="small"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Ask anything... e.g., 'Show me Bitcoin price trend' or 'Seattle Sounders xG at home'"
+            disabled={parsing}
+          />
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={isDisabled}
+            sx={{ whiteSpace: 'nowrap', minWidth: 80 }}
+          >
+            {parsing ? <CircularProgress size={20} color="inherit" /> : 'Ask'}
+          </Button>
+        </Box>
       </form>
 
       {interpretation && (
-        <p className="mt-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
+        <Alert severity="success" sx={{ mt: 1 }}>
           {interpretation}
-        </p>
+        </Alert>
       )}
 
       {error && (
-        <div className="mt-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-          <p>{error}</p>
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          {error}
           {suggestions.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-2">
+            <Box sx={{ mt: 0.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               {suggestions.map((s, i) => (
-                <button
+                <Link
                   key={i}
+                  component="button"
+                  variant="body2"
                   onClick={() => handleSuggestionClick(s)}
-                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  sx={{ cursor: 'pointer' }}
                 >
                   {s}
-                </button>
+                </Link>
               ))}
-            </div>
+            </Box>
           )}
-        </div>
+        </Alert>
       )}
-    </div>
+    </Box>
   )
 }

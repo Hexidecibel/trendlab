@@ -1,4 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import LinearProgress from '@mui/material/LinearProgress'
+import Typography from '@mui/material/Typography'
 
 interface Props {
   source: string
@@ -63,40 +68,51 @@ export function InsightPanel({ source, query, horizon }: Props) {
 
   if (status === 'unavailable') {
     return (
-      <div className="bg-white rounded-lg shadow p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">
-          AI Commentary
-        </h3>
-        <p className="text-xs text-gray-400 italic">
-          AI commentary is not available. Configure ANTHROPIC_API_KEY to enable.
-        </p>
-      </div>
+      <Card>
+        <CardContent>
+          <Typography variant="subtitle2" gutterBottom>
+            AI Commentary
+          </Typography>
+          <Typography variant="caption" color="text.disabled" fontStyle="italic">
+            AI commentary is not available. Configure ANTHROPIC_API_KEY to enable.
+          </Typography>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-2">
-        AI Commentary
-        {status === 'streaming' && (
-          <span className="ml-2 text-xs text-blue-500 animate-pulse">
-            streaming...
-          </span>
+    <Card>
+      <CardContent>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Typography variant="subtitle2">AI Commentary</Typography>
+          {status === 'streaming' && (
+            <Typography variant="caption" color="primary" sx={{ '@keyframes pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } }, animation: 'pulse 1.5s infinite' }}>
+              streaming...
+            </Typography>
+          )}
+          {status === 'loading' && (
+            <Typography variant="caption" color="text.disabled">
+              connecting...
+            </Typography>
+          )}
+        </Box>
+        {(status === 'loading' || status === 'streaming') && (
+          <LinearProgress sx={{ mb: 1 }} />
         )}
-        {status === 'loading' && (
-          <span className="ml-2 text-xs text-gray-400">connecting...</span>
+        {status === 'error' && (
+          <Typography variant="caption" color="error" display="block" sx={{ mb: 1 }}>
+            {errorMsg || 'An error occurred'}
+          </Typography>
         )}
-      </h3>
-      {status === 'error' && (
-        <p className="text-xs text-red-600 mb-2">{errorMsg || 'An error occurred'}</p>
-      )}
-      <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-        {text || (
-          <span className="text-gray-400 italic">
-            {status === 'loading' ? 'Connecting to AI...' : 'Waiting for data...'}
-          </span>
-        )}
-      </div>
-    </div>
+        <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+          {text || (
+            <Typography component="span" variant="body2" color="text.disabled" fontStyle="italic">
+              {status === 'loading' ? 'Connecting to AI...' : 'Waiting for data...'}
+            </Typography>
+          )}
+        </Typography>
+      </CardContent>
+    </Card>
   )
 }

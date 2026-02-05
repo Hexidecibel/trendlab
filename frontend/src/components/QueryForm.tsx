@@ -1,4 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
+import Autocomplete from '@mui/material/Autocomplete'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import FormControl from '@mui/material/FormControl'
+import InputLabel from '@mui/material/InputLabel'
+import Link from '@mui/material/Link'
+import MenuItem from '@mui/material/MenuItem'
+import Select from '@mui/material/Select'
+import TextField from '@mui/material/TextField'
 import type { DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
 
@@ -15,26 +26,16 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [showDateRange, setShowDateRange] = useState(false)
-  const [lookupCache, setLookupCache] = useState<
-    Record<string, LookupItem[]>
-  >({})
-  const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>(
-    {},
-  )
-  const [autocompleteSearch, setAutocompleteSearch] = useState<
-    Record<string, string>
-  >({})
+  const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
+  const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
 
   const selectedSource = sources.find((s) => s.name === source)
   const formFields = selectedSource?.form_fields || []
 
-  // Reset field values when source changes
   useEffect(() => {
     setFieldValues({})
-    setAutocompleteSearch({})
   }, [source])
 
-  // Load lookup data for autocomplete fields when dependencies change
   const loadLookup = useCallback(
     async (field: FormField) => {
       if (field.field_type !== 'autocomplete') return
@@ -54,7 +55,7 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
         )
         setLookupCache((prev) => ({ ...prev, [cacheKey]: items }))
       } catch {
-        // Silently fail — autocomplete just won't have options
+        // Silently fail
       } finally {
         setLookupLoading((prev) => ({ ...prev, [cacheKey]: false }))
       }
@@ -72,15 +73,9 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
 
   const buildQuery = (): string => {
     if (formFields.length === 0) return ''
-    // Simple adapters: just use "query" field
-    if (
-      formFields.length === 1 &&
-      formFields[0].name === 'query'
-    ) {
+    if (formFields.length === 1 && formFields[0].name === 'query') {
       return fieldValues['query'] || ''
     }
-    // Complex adapters: build colon-separated query
-    // e.g., "mls:teams:jYQJ19EqGR:xgoals_for"
     const parts: string[] = []
     for (const field of formFields) {
       parts.push(fieldValues[field.name] || '')
@@ -99,7 +94,6 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
   const setField = (name: string, value: string) => {
     setFieldValues((prev) => {
       const next = { ...prev, [name]: value }
-      // Clear dependent fields
       for (const f of formFields) {
         if (f.depends_on === name) {
           next[f.name] = ''
@@ -121,259 +115,170 @@ export function QueryForm({ sources, loading, onSubmit }: Props) {
       (f) => fieldValues[f.name] && fieldValues[f.name].trim() !== '',
     )
 
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="bg-white rounded-lg shadow p-4 mb-6"
-    >
-      <div className="flex flex-wrap gap-3 items-end">
-        {/* Source selector */}
-        <div className="min-w-[180px]">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Source
-          </label>
-          <select
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-          >
-            <option value="">Select a source...</option>
-            {sources.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name} &mdash; {s.description}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Dynamic fields */}
-        {formFields.map((field) => (
-          <DynamicField
-            key={`${source}-${field.name}`}
-            field={field}
-            value={fieldValues[field.name] || ''}
-            onChange={(v) => setField(field.name, v)}
-            lookupItems={getLookupItems(field)}
-            searchText={autocompleteSearch[field.name] || ''}
-            onSearchChange={(t) =>
-              setAutocompleteSearch((prev) => ({
-                ...prev,
-                [field.name]: t,
-              }))
-            }
-            disabled={
-              field.depends_on
-                ? !fieldValues[field.depends_on]
-                : false
-            }
-          />
-        ))}
-
-        {/* Horizon */}
-        {source && (
-          <div className="w-24">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Horizon
-            </label>
-            <input
-              type="number"
-              value={horizon}
-              onChange={(e) => setHorizon(Number(e.target.value))}
-              min={1}
-              max={365}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-            />
-          </div>
-        )}
-
-        {/* Date range toggle */}
-        {source && (
-          <button
-            type="button"
-            onClick={() => setShowDateRange(!showDateRange)}
-            className="text-xs text-blue-600 hover:text-blue-800 underline self-center pb-1"
-          >
-            {showDateRange ? 'Hide dates' : 'Date range'}
-          </button>
-        )}
-
-        {/* Submit */}
-        {source && (
-          <button
-            type="submit"
-            disabled={loading || !isComplete}
-            className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Loading...' : 'Analyze'}
-          </button>
-        )}
-      </div>
-
-      {/* Date range row */}
-      {showDateRange && source && (
-        <div className="flex gap-3 mt-3 pt-3 border-t border-gray-100">
-          <div className="w-40">
-            <label className="block text-xs font-medium text-gray-500 mb-1">
-              Start Date
-            </label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div className="w-40">
-            <label className="block text-xs font-medium text-gray-500 mb-1">
-              End Date
-            </label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-            />
-          </div>
-          {(startDate || endDate) && (
-            <button
-              type="button"
-              onClick={() => { setStartDate(''); setEndDate('') }}
-              className="text-xs text-gray-400 hover:text-gray-600 self-end pb-2"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      )}
-    </form>
-  )
-}
-
-interface DynamicFieldProps {
-  field: FormField
-  value: string
-  onChange: (value: string) => void
-  lookupItems: LookupItem[]
-  searchText: string
-  onSearchChange: (text: string) => void
-  disabled: boolean
-}
-
-function DynamicField({
-  field,
-  value,
-  onChange,
-  lookupItems,
-  searchText,
-  onSearchChange,
-  disabled,
-}: DynamicFieldProps) {
-  const [showDropdown, setShowDropdown] = useState(false)
-
-  if (field.field_type === 'text') {
-    return (
-      <div className="flex-1 min-w-[200px]">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {field.label}
-        </label>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+  const renderField = (field: FormField) => {
+    if (field.field_type === 'text') {
+      return (
+        <TextField
+          key={`${source}-${field.name}`}
+          size="small"
+          label={field.label}
+          value={fieldValues[field.name] || ''}
+          onChange={(e) => setField(field.name, e.target.value)}
           placeholder={field.placeholder}
-          className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+          sx={{ minWidth: 200, flex: 1 }}
         />
-      </div>
-    )
-  }
+      )
+    }
 
-  if (field.field_type === 'select') {
-    return (
-      <div className="min-w-[150px]">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {field.label}
-        </label>
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+    if (field.field_type === 'select') {
+      const disabled = field.depends_on ? !fieldValues[field.depends_on] : false
+      return (
+        <FormControl
+          key={`${source}-${field.name}`}
+          size="small"
+          sx={{ minWidth: 150 }}
           disabled={disabled}
-          className="w-full border border-gray-300 rounded px-3 py-2 text-sm disabled:opacity-50"
         >
-          <option value="">Select...</option>
-          {field.options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    )
-  }
-
-  if (field.field_type === 'autocomplete') {
-    const selectedLabel =
-      lookupItems.find((item) => item.value === value)?.label || ''
-    const filtered = lookupItems.filter((item) =>
-      item.label.toLowerCase().includes(searchText.toLowerCase()),
-    )
-
-    return (
-      <div className="min-w-[220px] relative">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {field.label}
-        </label>
-        <input
-          type="text"
-          value={showDropdown ? searchText : selectedLabel}
-          onChange={(e) => {
-            onSearchChange(e.target.value)
-            if (!showDropdown) setShowDropdown(true)
-            // Clear selection when typing
-            if (value) onChange('')
-          }}
-          onFocus={() => {
-            setShowDropdown(true)
-            onSearchChange('')
-          }}
-          onBlur={() => {
-            // Delay to allow click on dropdown item
-            setTimeout(() => setShowDropdown(false), 200)
-          }}
-          placeholder={
-            disabled ? 'Select above first...' : field.placeholder
-          }
-          disabled={disabled}
-          className="w-full border border-gray-300 rounded px-3 py-2 text-sm disabled:opacity-50"
-        />
-        {showDropdown && !disabled && filtered.length > 0 && (
-          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded shadow-lg max-h-48 overflow-y-auto">
-            {filtered.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 focus:bg-blue-50"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  onChange(item.value)
-                  onSearchChange(item.label)
-                  setShowDropdown(false)
-                }}
-              >
-                {item.label}
-              </button>
+          <InputLabel>{field.label}</InputLabel>
+          <Select
+            value={fieldValues[field.name] || ''}
+            label={field.label}
+            onChange={(e) => setField(field.name, e.target.value)}
+          >
+            {field.options.map((opt) => (
+              <MenuItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </MenuItem>
             ))}
-          </div>
-        )}
-        {showDropdown &&
-          !disabled &&
-          lookupItems.length === 0 && (
-            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded shadow-lg px-3 py-2">
-              <span className="text-xs text-gray-400">Loading...</span>
-            </div>
+          </Select>
+        </FormControl>
+      )
+    }
+
+    if (field.field_type === 'autocomplete') {
+      const items = getLookupItems(field)
+      const disabled = field.depends_on ? !fieldValues[field.depends_on] : false
+      const selectedItem = items.find((item) => item.value === fieldValues[field.name]) || null
+
+      return (
+        <Autocomplete
+          key={`${source}-${field.name}`}
+          size="small"
+          sx={{ minWidth: 220 }}
+          options={items}
+          getOptionLabel={(opt) => opt.label}
+          value={selectedItem}
+          onChange={(_e, newValue) => {
+            setField(field.name, newValue?.value || '')
+          }}
+          loading={items.length === 0 && !disabled}
+          disabled={disabled}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label={field.label}
+              placeholder={disabled ? 'Select above first...' : field.placeholder}
+            />
           )}
-      </div>
-    )
+        />
+      )
+    }
+
+    return null
   }
 
-  return null
+  return (
+    <Card sx={{ mb: 3 }}>
+      <CardContent>
+        <form onSubmit={handleSubmit}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'flex-end' }}>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel>Source</InputLabel>
+              <Select
+                value={source}
+                label="Source"
+                onChange={(e) => setSource(e.target.value)}
+              >
+                {sources.map((s) => (
+                  <MenuItem key={s.name} value={s.name}>
+                    {s.name} &mdash; {s.description}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {formFields.map(renderField)}
+
+            {source && (
+              <TextField
+                size="small"
+                label="Horizon"
+                type="number"
+                value={horizon}
+                onChange={(e) => setHorizon(Number(e.target.value))}
+                slotProps={{ htmlInput: { min: 1, max: 365 } }}
+                sx={{ width: 100 }}
+              />
+            )}
+
+            {source && (
+              <Link
+                component="button"
+                type="button"
+                variant="body2"
+                onClick={() => setShowDateRange(!showDateRange)}
+                sx={{ alignSelf: 'center', pb: 0.5 }}
+              >
+                {showDateRange ? 'Hide dates' : 'Date range'}
+              </Link>
+            )}
+
+            {source && (
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={loading || !isComplete}
+              >
+                {loading ? 'Loading...' : 'Analyze'}
+              </Button>
+            )}
+          </Box>
+
+          {showDateRange && source && (
+            <Box sx={{ display: 'flex', gap: 1.5, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+              <TextField
+                size="small"
+                label="Start Date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ width: 170 }}
+              />
+              <TextField
+                size="small"
+                label="End Date"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ width: 170 }}
+              />
+              {(startDate || endDate) && (
+                <Link
+                  component="button"
+                  type="button"
+                  variant="body2"
+                  onClick={() => { setStartDate(''); setEndDate('') }}
+                  sx={{ alignSelf: 'flex-end', pb: 0.5 }}
+                >
+                  Clear
+                </Link>
+              )}
+            </Box>
+          )}
+        </form>
+      </CardContent>
+    </Card>
+  )
 }

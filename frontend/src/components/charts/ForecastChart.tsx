@@ -1,3 +1,7 @@
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Typography from '@mui/material/Typography'
 import { Line } from 'react-chartjs-2'
 import type { TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
 
@@ -151,13 +155,15 @@ export function ForecastChart({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-3">
-        Time Series & Forecast
-      </h3>
-      <div className="h-80">
-        <Line data={data} options={options} />
-      </div>
-    </div>
+    <Card>
+      <CardContent>
+        <Typography variant="subtitle2" gutterBottom>
+          Time Series & Forecast
+        </Typography>
+        <Box sx={{ height: 320 }}>
+          <Line data={data} options={options} />
+        </Box>
+      </CardContent>
+    </Card>
   )
 }

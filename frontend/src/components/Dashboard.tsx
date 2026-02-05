@@ -1,4 +1,12 @@
 import { useState } from 'react'
+import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
+import CircularProgress from '@mui/material/CircularProgress'
+import Divider from '@mui/material/Divider'
+import FormControlLabel from '@mui/material/FormControlLabel'
+import Checkbox from '@mui/material/Checkbox'
+import Grid from '@mui/material/Grid'
+import Typography from '@mui/material/Typography'
 import { useApi } from '../hooks/useApi'
 import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
@@ -22,24 +30,20 @@ export function Dashboard() {
     loadData(source, query, horizon, start, end)
   }
 
-  // Auto-select recommended model when forecast loads
   const effectiveModel =
     selectedModel || forecast?.recommended_model || ''
 
   const hasData = series && analysis && forecast
 
   return (
-    <div>
+    <Box>
       <NaturalQueryInput loading={loading} onResult={handleSubmit} />
 
-      <div className="relative my-6">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-gray-200" />
-        </div>
-        <div className="relative flex justify-center text-sm">
-          <span className="bg-white px-3 text-gray-400">or use the form</span>
-        </div>
-      </div>
+      <Divider sx={{ my: 3 }}>
+        <Typography variant="caption" color="text.secondary">
+          or use the form
+        </Typography>
+      </Divider>
 
       <QueryForm
         sources={sources}
@@ -48,30 +52,32 @@ export function Dashboard() {
       />
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-3 mb-6">
+        <Alert severity="error" sx={{ mb: 3 }}>
           {error}
-        </div>
+        </Alert>
       )}
 
       {loading && (
-        <div className="text-center py-12 text-gray-500">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3" />
-          <p className="text-sm">Fetching data and running analysis...</p>
-        </div>
+        <Box sx={{ textAlign: 'center', py: 6 }}>
+          <CircularProgress size={32} />
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            Fetching data and running analysis...
+          </Typography>
+        </Box>
       )}
 
       {hasData && (
         <>
-          <div className="mb-4">
+          <Box sx={{ mb: 2 }}>
             <ModelSelector
               forecast={forecast}
               selected={effectiveModel}
               onChange={setSelectedModel}
             />
-          </div>
+          </Box>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, lg: 8 }}>
               <ForecastChart
                 series={series}
                 forecast={forecast}
@@ -80,54 +86,62 @@ export function Dashboard() {
                 showBreaks={showBreaks}
                 showAnomalies={showAnomalies}
               />
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showBreaks}
-                    onChange={(e) => setShowBreaks(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  Structural breaks
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showAnomalies}
-                    onChange={(e) => setShowAnomalies(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  Anomalies
-                </label>
-              </div>
-              <EvaluationTable
-                evaluations={forecast.evaluations}
-                recommended={forecast.recommended_model}
-              />
-            </div>
+              <Box sx={{ mt: 1, display: 'flex', gap: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={showBreaks}
+                      onChange={(e) => setShowBreaks(e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="body2">Structural breaks</Typography>}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={showAnomalies}
+                      onChange={(e) => setShowAnomalies(e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="body2">Anomalies</Typography>}
+                />
+              </Box>
+              <Box sx={{ mt: 2 }}>
+                <EvaluationTable
+                  evaluations={forecast.evaluations}
+                  recommended={forecast.recommended_model}
+                />
+              </Box>
+            </Grid>
 
-            <div className="space-y-6">
+            <Grid size={{ xs: 12, lg: 4 }}>
               <AnalysisPanel analysis={analysis} />
               {lastQuery.source && lastQuery.query && (
-                <InsightPanel
-                  source={lastQuery.source}
-                  query={lastQuery.query}
-                  horizon={lastQuery.horizon}
-                />
+                <Box sx={{ mt: 3 }}>
+                  <InsightPanel
+                    source={lastQuery.source}
+                    query={lastQuery.query}
+                    horizon={lastQuery.horizon}
+                  />
+                </Box>
               )}
-            </div>
-          </div>
+            </Grid>
+          </Grid>
         </>
       )}
 
       {!hasData && !loading && !error && (
-        <div className="text-center py-16 text-gray-400">
-          <p className="text-lg mb-1">Select a data source and enter a query to get started</p>
-          <p className="text-sm">
+        <Box sx={{ textAlign: 'center', py: 8 }}>
+          <Typography variant="body1" color="text.secondary" gutterBottom>
+            Select a data source and enter a query to get started
+          </Typography>
+          <Typography variant="body2" color="text.disabled">
             Try PyPI with "fastapi" or Crypto with "bitcoin"
-          </p>
-        </div>
+          </Typography>
+        </Box>
       )}
-    </div>
+    </Box>
   )
 }

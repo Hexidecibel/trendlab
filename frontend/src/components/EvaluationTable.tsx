@@ -1,4 +1,14 @@
 import { useState } from 'react'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableContainer from '@mui/material/TableContainer'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import TableSortLabel from '@mui/material/TableSortLabel'
+import Typography from '@mui/material/Typography'
 import type { ModelEvaluation } from '../api/types'
 
 interface Props {
@@ -32,80 +42,87 @@ export function EvaluationTable({ evaluations, recommended }: Props) {
     }
   }
 
-  const arrow = (key: SortKey) =>
-    sortKey === key ? (sortAsc ? ' \u2191' : ' \u2193') : ''
-
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h3 className="text-sm font-semibold text-gray-700 mb-3">
-        Model Comparison
-      </h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th
-                className="text-left py-2 px-2 cursor-pointer hover:text-blue-600"
-                onClick={() => handleSort('model_name')}
-              >
-                Model{arrow('model_name')}
-              </th>
-              <th
-                className="text-right py-2 px-2 cursor-pointer hover:text-blue-600"
-                onClick={() => handleSort('mae')}
-              >
-                MAE{arrow('mae')}
-              </th>
-              <th
-                className="text-right py-2 px-2 cursor-pointer hover:text-blue-600"
-                onClick={() => handleSort('rmse')}
-              >
-                RMSE{arrow('rmse')}
-              </th>
-              <th
-                className="text-right py-2 px-2 cursor-pointer hover:text-blue-600"
-                onClick={() => handleSort('mape')}
-              >
-                MAPE %{arrow('mape')}
-              </th>
-              <th className="text-right py-2 px-2">Train</th>
-              <th className="text-right py-2 px-2">Test</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((ev) => (
-              <tr
-                key={ev.model_name}
-                className={
-                  ev.model_name === recommended
-                    ? 'bg-blue-50 font-semibold'
-                    : 'hover:bg-gray-50'
-                }
-              >
-                <td className="py-1.5 px-2">
-                  {ev.model_name}
-                  {ev.model_name === recommended && (
-                    <span className="ml-1 text-blue-600 text-[10px]">
-                      BEST
-                    </span>
-                  )}
-                </td>
-                <td className="text-right py-1.5 px-2">
-                  {ev.mae.toFixed(2)}
-                </td>
-                <td className="text-right py-1.5 px-2">
-                  {ev.rmse.toFixed(2)}
-                </td>
-                <td className="text-right py-1.5 px-2">
-                  {ev.mape.toFixed(1)}
-                </td>
-                <td className="text-right py-1.5 px-2">{ev.train_size}</td>
-                <td className="text-right py-1.5 px-2">{ev.test_size}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Card>
+      <CardContent>
+        <Typography variant="subtitle2" gutterBottom>
+          Model Comparison
+        </Typography>
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>
+                  <TableSortLabel
+                    active={sortKey === 'model_name'}
+                    direction={sortKey === 'model_name' ? (sortAsc ? 'asc' : 'desc') : 'asc'}
+                    onClick={() => handleSort('model_name')}
+                  >
+                    Model
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right">
+                  <TableSortLabel
+                    active={sortKey === 'mae'}
+                    direction={sortKey === 'mae' ? (sortAsc ? 'asc' : 'desc') : 'asc'}
+                    onClick={() => handleSort('mae')}
+                  >
+                    MAE
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right">
+                  <TableSortLabel
+                    active={sortKey === 'rmse'}
+                    direction={sortKey === 'rmse' ? (sortAsc ? 'asc' : 'desc') : 'asc'}
+                    onClick={() => handleSort('rmse')}
+                  >
+                    RMSE
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right">
+                  <TableSortLabel
+                    active={sortKey === 'mape'}
+                    direction={sortKey === 'mape' ? (sortAsc ? 'asc' : 'desc') : 'asc'}
+                    onClick={() => handleSort('mape')}
+                  >
+                    MAPE %
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right">Train</TableCell>
+                <TableCell align="right">Test</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {sorted.map((ev) => (
+                <TableRow
+                  key={ev.model_name}
+                  selected={ev.model_name === recommended}
+                  hover
+                >
+                  <TableCell>
+                    {ev.model_name}
+                    {ev.model_name === recommended && (
+                      <Typography
+                        component="span"
+                        variant="caption"
+                        color="primary"
+                        sx={{ ml: 0.5, fontWeight: 600 }}
+                      >
+                        BEST
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell align="right">{ev.mae.toFixed(2)}</TableCell>
+                  <TableCell align="right">{ev.rmse.toFixed(2)}</TableCell>
+                  <TableCell align="right">{ev.mape.toFixed(1)}</TableCell>
+                  <TableCell align="right">{ev.train_size}</TableCell>
+                  <TableCell align="right">{ev.test_size}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </CardContent>
+    </Card>
   )
 }

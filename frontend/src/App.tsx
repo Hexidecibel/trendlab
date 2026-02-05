@@ -1,17 +1,40 @@
+import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
+import AppBar from '@mui/material/AppBar'
+import Container from '@mui/material/Container'
+import Toolbar from '@mui/material/Toolbar'
+import Typography from '@mui/material/Typography'
 import { Dashboard } from './components/Dashboard'
+
+const theme = createTheme({
+  palette: {
+    primary: { main: '#3b82f6' },
+    secondary: { main: '#f97316' },
+    background: { default: '#f8fafc' },
+  },
+  typography: {
+    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+  },
+})
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <h1 className="text-2xl font-bold text-gray-900">TrendLab</h1>
-        <p className="text-sm text-gray-500">
-          AI-powered trend analysis and forecasting
-        </p>
-      </header>
-      <main className="max-w-7xl mx-auto px-4 py-6">
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <AppBar position="static" color="default" elevation={1}>
+        <Toolbar>
+          <div>
+            <Typography variant="h6" fontWeight={700}>
+              TrendLab
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              AI-powered trend analysis and forecasting
+            </Typography>
+          </div>
+        </Toolbar>
+      </AppBar>
+      <Container maxWidth="xl" sx={{ py: 3 }}>
         <Dashboard />
-      </main>
-    </div>
+      </Container>
+    </ThemeProvider>
   )
 }

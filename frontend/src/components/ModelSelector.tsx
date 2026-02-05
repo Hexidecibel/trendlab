@@ -1,3 +1,7 @@
+import Box from '@mui/material/Box'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
+import Typography from '@mui/material/Typography'
 import type { ForecastComparison } from '../api/types'
 
 interface Props {
@@ -12,28 +16,32 @@ export function ModelSelector({ forecast, selected, onChange }: Props) {
   )
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-sm font-medium text-gray-700">Model:</span>
-      {forecast.forecasts.map((f) => {
-        const isRecommended = f.model_name === forecast.recommended_model
-        const isSelected = f.model_name === selected
-        const ev = evalMap.get(f.model_name)
-        return (
-          <button
-            key={f.model_name}
-            onClick={() => onChange(f.model_name)}
-            className={`text-xs px-3 py-1 rounded-full border transition-colors ${
-              isSelected
-                ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
-            }`}
-          >
-            {f.model_name}
-            {isRecommended && ' *'}
-            {ev && ` (MAE: ${ev.mae.toFixed(2)})`}
-          </button>
-        )
-      })}
-    </div>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+      <Typography variant="body2" fontWeight={500}>
+        Model:
+      </Typography>
+      <ToggleButtonGroup
+        size="small"
+        exclusive
+        value={selected}
+        onChange={(_e, val) => { if (val) onChange(val) }}
+      >
+        {forecast.forecasts.map((f) => {
+          const isRecommended = f.model_name === forecast.recommended_model
+          const ev = evalMap.get(f.model_name)
+          return (
+            <ToggleButton
+              key={f.model_name}
+              value={f.model_name}
+              sx={{ textTransform: 'none', fontSize: '0.75rem', px: 1.5 }}
+            >
+              {f.model_name}
+              {isRecommended && ' *'}
+              {ev && ` (MAE: ${ev.mae.toFixed(2)})`}
+            </ToggleButton>
+          )
+        })}
+      </ToggleButtonGroup>
+    </Box>
   )
 }
