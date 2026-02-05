@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 
 class CachedFetcher:
-    """Wraps adapter.fetch() with DB-backed TTL caching."""
+    """Wraps adapter.fetch() with DB-backed TTL caching and request deduplication."""
 
     DEFAULT_TTL = 3600  # 1 hour
 
@@ -26,6 +26,8 @@ class CachedFetcher:
     ):
         self.ttl_seconds = ttl_seconds or {}
         self.default_ttl = default_ttl
+        # In-flight request deduplication: key -> Future
+        self._inflight: dict[str, asyncio.Future[TimeSeries]] = {}
 
     def _get_ttl(self, source: str) -> int:
         return self.ttl_seconds.get(source, self.default_ttl)
@@ -49,27 +51,48 @@ class CachedFetcher:
                 )
                 return cached
 
-        # Cache miss, stale, or forced refresh
-        log.with_fields(cache_hit=False, refresh=refresh).info("Cache miss, fetching")
-        start_time = time.perf_counter()
-        ts = await adapter.fetch(query, start=start, end=end)
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        # Check for in-flight request with same parameters
+        cache_key = f"{source}:{query}:{start}:{end}"
+        if cache_key in self._inflight:
+            log.info("Waiting for in-flight request")
+            return await self._inflight[cache_key]
 
-        # Retry once if empty (API may have transient issues)
-        if not ts.points:
-            log.info("Empty response, retrying once")
-            await asyncio.sleep(0.5)
+        # Create a future for this request so others can wait on it
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[TimeSeries] = loop.create_future()
+        self._inflight[cache_key] = future
+
+        try:
+            # Cache miss, stale, or forced refresh
+            log.with_fields(cache_hit=False, refresh=refresh).info("Cache miss, fetching")
+            start_time = time.perf_counter()
             ts = await adapter.fetch(query, start=start, end=end)
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        log.with_fields(fetch_ms=round(elapsed_ms, 2), data_points=len(ts.points)).info(
-            "Fetched from source"
-        )
+            # Retry once if empty (API may have transient issues)
+            if not ts.points:
+                log.info("Empty response, retrying once")
+                await asyncio.sleep(0.5)
+                ts = await adapter.fetch(query, start=start, end=end)
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-        # Only cache non-empty series to avoid caching transient API failures
-        if _engine_mod.async_session is not None and ts.points:
-            await save_series(ts, start_date=start, end_date=end)
-        return ts
+            log.with_fields(fetch_ms=round(elapsed_ms, 2), data_points=len(ts.points)).info(
+                "Fetched from source"
+            )
+
+            # Only cache non-empty series to avoid caching transient API failures
+            if _engine_mod.async_session is not None and ts.points:
+                await save_series(ts, start_date=start, end_date=end)
+
+            # Resolve the future so waiting requests get the result
+            future.set_result(ts)
+            return ts
+        except Exception as e:
+            future.set_exception(e)
+            raise
+        finally:
+            # Clean up in-flight tracker
+            self._inflight.pop(cache_key, None)
 
     async def _get_fresh(
         self,
