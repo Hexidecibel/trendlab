@@ -17,10 +17,10 @@ docker rm trendlab 2>/dev/null || true
 
 echo "Starting new container..."
 docker run -d --name trendlab \
-  -p 8080:8000 \
+  -p 9393:8000 \
   --env-file .env \
   --restart unless-stopped \
   trendlab
 
-echo "Done! TrendLab is running at http://localhost:8080"
+echo "Done! TrendLab is running at http://localhost:9393"
 docker logs -f trendlab --tail 20
