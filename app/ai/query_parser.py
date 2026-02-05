@@ -220,8 +220,10 @@ RULES:
 5. Default optional fields (home_away, stage) to "all" if not mentioned.
 6. If the query is ambiguous or doesn't match any source, return an error response.
 7. For date ranges, interpret relative terms using today's date ({today}):
-   - "this season" / "this year" → start = {year}-01-01
    - "last 30 days" → start = appropriate date
+   - "last 6 months" / "last year" → start = appropriate date
+   - "this year" → start = {year}-01-01
+   - "this season" for sports (ASA) → set start and end to null (the API already returns current season data)
    - If no date mentioned, set start and end to null.
 8. COMPARE INTENT: If the user wants to compare multiple items (keywords: "compare",
    "vs", "versus", "and" between two entities, "side by side"), return a compare
@@ -244,7 +246,7 @@ Response: {{"source": "pypi", "fields": {{"query": "fastapi"}}, "horizon": 14, \
 Query: "Seattle Sounders expected goals at home this season"
 Response: {{"source": "asa", "fields": {{"league": "mls", "team": "Seattle Sounders FC", \
 "metric": "xgoals_for", "home_away": "home", "stage": "regular"}}, "horizon": 14, \
-"start": "{year}-01-01", "end": null, "resample": null, "apply": null, \
+"start": null, "end": null, "resample": null, "apply": null, \
 "interpretation": "Expected goals (xG) for Seattle Sounders FC in home MLS \
 regular season games this season"}}
 
@@ -275,10 +277,10 @@ Query: "Seattle Sounders vs LA Galaxy xG this season"
 Response: {{"compare": true, "items": [\
 {{"source": "asa", "fields": {{"league": "mls", "team": "Seattle Sounders FC", \
 "metric": "xgoals_for", "home_away": "all", "stage": "regular"}}, \
-"start": "{year}-01-01", "end": null}}, \
+"start": null, "end": null}}, \
 {{"source": "asa", "fields": {{"league": "mls", "team": "LA Galaxy", \
 "metric": "xgoals_for", "home_away": "all", "stage": "regular"}}, \
-"start": "{year}-01-01", "end": null}}], \
+"start": null, "end": null}}], \
 "resample": null, \
 "interpretation": "Comparing expected goals for Seattle Sounders FC vs LA Galaxy \
 in MLS regular season this season"}}"""

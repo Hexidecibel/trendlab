@@ -119,7 +119,8 @@ export function Dashboard() {
       start: i.start ?? undefined,
       end: i.end ?? undefined,
     }))
-    handleCompare(compareItems, resample)
+    // Wait for next tick to ensure state updates are flushed before API call
+    setTimeout(() => handleCompare(compareItems, resample), 0)
   }
 
   const effectiveModel =
