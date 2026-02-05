@@ -7,6 +7,7 @@ import type { TrendAnalysis } from '../api/types'
 
 interface Props {
   analysis: TrendAnalysis
+  compact?: boolean
 }
 
 const DIRECTION_COLORS: Record<string, 'success' | 'error' | 'default'> = {
@@ -15,9 +16,32 @@ const DIRECTION_COLORS: Record<string, 'success' | 'error' | 'default'> = {
   stable: 'default',
 }
 
-export function AnalysisPanel({ analysis }: Props) {
+export function AnalysisPanel({ analysis, compact = false }: Props) {
   const { trend, seasonality, anomalies, structural_breaks } = analysis
   const chipColor = DIRECTION_COLORS[trend.direction] || 'default'
+
+  if (compact) {
+    return (
+      <Card variant="outlined" sx={{ bgcolor: 'background.default' }}>
+        <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+          <Chip
+            label={trend.direction.toUpperCase()}
+            color={chipColor}
+            size="small"
+            sx={{ mr: 1 }}
+          />
+          <Typography variant="caption" color="text.secondary">
+            Momentum: {trend.momentum.toFixed(4)}
+          </Typography>
+          <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+            {seasonality.detected
+              ? `${seasonality.period_days}-day seasonality`
+              : 'No seasonality'} · {anomalies.anomaly_count} anomalies · {structural_breaks.length} breaks
+          </Typography>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>

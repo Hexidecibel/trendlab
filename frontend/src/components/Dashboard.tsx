@@ -15,7 +15,7 @@ import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
 import { useApi } from '../hooks/useApi'
 import { fetchCompare } from '../api/client'
-import type { CompareItem, NaturalCompareItem, TimeSeries } from '../api/types'
+import type { CompareItem, NaturalCompareItem, TimeSeries, TrendAnalysis } from '../api/types'
 import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
 import type { QueryPrefill } from './QueryForm'
@@ -27,17 +27,45 @@ import { ModelSelector } from './ModelSelector'
 import { AnalysisPanel } from './AnalysisPanel'
 import { EvaluationTable } from './EvaluationTable'
 import { InsightPanel } from './InsightPanel'
+import { CompareInsightPanel } from './CompareInsightPanel'
+
+// Generate a friendly label from series metadata or query
+function getFriendlyLabel(s: TimeSeries): string {
+  const meta = s.metadata || {}
+
+  // Try to build from metadata
+  if (meta.article) return `${meta.article} (Wikipedia)`
+  if (meta.package) return `${meta.package} (PyPI)`
+  if (meta.coin) return `${meta.coin} (Crypto)`
+  if (meta.symbol) return `${meta.symbol} (${meta.metric || 'Stock'})`
+  if (meta.team) return `${meta.team} (${meta.metric_label || 'xG'})`
+  if (meta.player) return `${meta.player} (${meta.metric_label || 'xG'})`
+  if (meta.location) return `${meta.location} (${meta.metric_label || 'Weather'})`
+
+  // Fallback: simplify query
+  const query = s.query
+  if (query.includes(':')) {
+    const parts = query.split(':')
+    return parts[1] || parts[0] || query
+  }
+
+  return `${s.source}: ${query}`
+}
 
 export function Dashboard() {
   const { sources, series, analysis, forecast, loading, error, loadData } =
     useApi()
   const [selectedModel, setSelectedModel] = useState('')
-  const [lastQuery, setLastQuery] = useState({ source: '', query: '', horizon: 14 })
+  const [lastQuery, setLastQuery] = useState({ source: '', query: '', horizon: 14, resample: '' })
   const [showBreaks, setShowBreaks] = useState(true)
   const [showAnomalies, setShowAnomalies] = useState(true)
 
-  const [activeTab, setActiveTab] = useState<'explore' | 'compare'>('explore')
+  const [activeTab, setActiveTab] = useState<'forecast' | 'compare'>('forecast')
   const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
+  const [compareAnalyses, setCompareAnalyses] = useState<TrendAnalysis[] | null>(null)
+  const [compareResample, setCompareResample] = useState('')
+  const [compareApply, setCompareApply] = useState('')
+  const [compareItems, setCompareItems] = useState<CompareItem[]>([])
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | null>(null)
   const [anomalyMethod, setAnomalyMethod] = useState('zscore')
@@ -45,8 +73,8 @@ export function Dashboard() {
   const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
 
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => {
-    setActiveTab('explore')
-    setLastQuery({ source, query, horizon })
+    setActiveTab('forecast')
+    setLastQuery({ source, query, horizon, resample: resample || '' })
     setSelectedModel('')
     loadData(source, query, horizon, start, end, resample, apply, anomalyMethod, refresh)
   }
@@ -60,9 +88,14 @@ export function Dashboard() {
     setCompareLoading(true)
     setCompareError(null)
     setCompareSeries(null)
+    setCompareAnalyses(null)
+    setCompareResample(resample || '')
+    setCompareApply(apply || '')
+    setCompareItems(items)
     try {
       const result = await fetchCompare(items, resample, apply)
       setCompareSeries(result.series)
+      setCompareAnalyses(result.analyses ?? null)
     } catch (err) {
       setCompareError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -107,11 +140,11 @@ export function Dashboard() {
         onChange={(_, v) => setActiveTab(v)}
         sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
       >
-        <Tab value="explore" label="Explore" />
+        <Tab value="forecast" label="Forecast" />
         <Tab value="compare" label="Compare" />
       </Tabs>
 
-      {activeTab === 'explore' && (
+      {activeTab === 'forecast' && (
         <>
           <Divider sx={{ my: 2 }}>
             <Typography variant="caption" color="text.secondary">
@@ -160,6 +193,7 @@ export function Dashboard() {
                     analysis={analysis}
                     showBreaks={showBreaks}
                     showAnomalies={showAnomalies}
+                    resample={lastQuery.resample}
                   />
                   <Box sx={{ mt: 1, display: 'flex', gap: 2, alignItems: 'center' }}>
                     <FormControlLabel
@@ -210,6 +244,9 @@ export function Dashboard() {
                         source={lastQuery.source}
                         query={lastQuery.query}
                         horizon={lastQuery.horizon}
+                        series={series}
+                        analysis={analysis}
+                        forecast={forecast}
                       />
                     </Box>
                   )}
@@ -256,7 +293,41 @@ export function Dashboard() {
           )}
 
           {compareSeries && !compareLoading && (
-            <CompareChart seriesList={compareSeries} />
+            <>
+              <Grid container spacing={3}>
+                <Grid size={{ xs: 12, lg: compareAnalyses ? 8 : 12 }}>
+                  <CompareChart seriesList={compareSeries} resample={compareResample} />
+                </Grid>
+                {compareAnalyses && (
+                  <Grid size={{ xs: 12, lg: 4 }}>
+                    {compareAnalyses.map((a, i) => (
+                      <Box key={i} sx={{ mb: 2 }}>
+                        <Typography
+                          variant="subtitle2"
+                          sx={{
+                            mb: 1,
+                            color: ['#3b82f6', '#f97316', '#10b981'][i],
+                            fontWeight: 600,
+                          }}
+                        >
+                          {getFriendlyLabel(compareSeries[i])}
+                        </Typography>
+                        <AnalysisPanel analysis={a} compact />
+                      </Box>
+                    ))}
+                  </Grid>
+                )}
+              </Grid>
+              {compareItems.length >= 2 && (
+                <CompareInsightPanel
+                  items={compareItems}
+                  resample={compareResample}
+                  apply={compareApply}
+                  seriesList={compareSeries ?? undefined}
+                  analyses={compareAnalyses ?? undefined}
+                />
+              )}
+            </>
           )}
 
           {!compareSeries && !compareLoading && !compareError && (

@@ -1,11 +1,11 @@
-"""American Soccer Analysis adapter — configurable soccer metrics."""
+"""American Soccer Analysis adapter — team metrics for MLS, NWSL, USL."""
 
 import datetime
-import logging
 
 import httpx
 
 from app.data.base import DataAdapter
+from app.logging_config import get_logger
 from app.models.schemas import (
     DataPoint,
     FormField,
@@ -14,7 +14,7 @@ from app.models.schemas import (
     TimeSeries,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 ASA_API_URL = "https://app.americansocceranalysis.com/api/v1"
 
@@ -43,39 +43,13 @@ XPASS_METRICS = [
     "pass_completion_percentage_against",
 ]
 
-# Player-level metrics (different field names from team metrics)
-PLAYER_XGOALS_METRICS = [
-    "goals",
-    "xgoals",
-    "shots",
-    "shots_on_target",
-    "goals_minus_xgoals",
-    "key_passes",
-    "primary_assists",
-    "xassists",
-    "xgoals_plus_xassists",
-    "minutes_played",
-]
-
-PLAYER_XPASS_METRICS = [
-    "attempted_passes",
-    "pass_completion_percentage",
-    "xpass_completion_percentage",
-    "passes_completed_over_expected",
-]
-
 ALL_METRICS = XGOALS_METRICS + XPASS_METRICS
-ALL_PLAYER_METRICS = PLAYER_XGOALS_METRICS + PLAYER_XPASS_METRICS
 
 # Map metric name to which endpoint category it comes from
 METRIC_ENDPOINT: dict[str, str] = {}
 for m in XGOALS_METRICS:
     METRIC_ENDPOINT[m] = "xgoals"
 for m in XPASS_METRICS:
-    METRIC_ENDPOINT[m] = "xpass"
-for m in PLAYER_XGOALS_METRICS:
-    METRIC_ENDPOINT[m] = "xgoals"
-for m in PLAYER_XPASS_METRICS:
     METRIC_ENDPOINT[m] = "xpass"
 
 METRIC_LABELS = {
@@ -94,27 +68,12 @@ METRIC_LABELS = {
     "passes_completed_over_expected_for": "Passes Over Expected",
     "attempted_passes_for": "Attempted Passes",
     "pass_completion_percentage_against": "Opponent Pass Completion %",
-    # Player-level metrics
-    "goals": "Goals",
-    "xgoals": "Expected Goals (xG)",
-    "shots": "Shots",
-    "shots_on_target": "Shots on Target",
-    "goals_minus_xgoals": "Goals - xG",
-    "key_passes": "Key Passes",
-    "primary_assists": "Assists",
-    "xassists": "Expected Assists (xA)",
-    "xgoals_plus_xassists": "xG + xA",
-    "minutes_played": "Minutes Played",
-    "attempted_passes": "Attempted Passes",
-    "pass_completion_percentage": "Pass Completion %",
-    "xpass_completion_percentage": "Expected Pass Completion %",
-    "passes_completed_over_expected": "Passes Over Expected",
 }
 
 
 class ASAAdapter(DataAdapter):
     name = "asa"
-    description = "American Soccer Analysis — MLS, NWSL, USL metrics"
+    description = "American Soccer Analysis — MLS, NWSL, USL team metrics"
 
     def form_fields(self) -> list[FormField]:
         return [
@@ -129,19 +88,10 @@ class ASAAdapter(DataAdapter):
                 ],
             ),
             FormField(
-                name="entity_type",
-                label="Type",
-                field_type="select",
-                options=[
-                    FormFieldOption(value="teams", label="Teams"),
-                    FormFieldOption(value="players", label="Players"),
-                ],
-            ),
-            FormField(
-                name="entity",
-                label="Entity",
+                name="team",
+                label="Team",
                 field_type="autocomplete",
-                placeholder="Search teams or players...",
+                placeholder="Search teams...",
                 depends_on="league",
             ),
             FormField(
@@ -180,10 +130,8 @@ class ASAAdapter(DataAdapter):
         if league not in LEAGUES:
             league = "mls"
 
-        if lookup_type == "teams":
+        if lookup_type in ("teams", "team"):
             return await self._lookup_teams(league)
-        if lookup_type == "players":
-            return await self._lookup_players(league)
 
         return []
 
@@ -201,24 +149,16 @@ class ASAAdapter(DataAdapter):
         teams = response.json()
         return [LookupItem(value=t["team_id"], label=t["team_name"]) for t in teams]
 
-    async def _lookup_players(self, league: str) -> list[LookupItem]:
-        url = f"{ASA_API_URL}/{league}/players"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=15.0)
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError:
-                if response.status_code in (400, 404):
-                    raise ValueError(
-                        f"Players not found for league '{league}'"
-                    ) from None
-                raise
-
-        players = response.json()
-        return [
-            LookupItem(value=p["player_id"], label=p["player_name"])
-            for p in players
-        ]
+    async def _get_team_name(self, league: str, team_id: str) -> str | None:
+        """Look up team name from ID. Returns None if not found."""
+        try:
+            items = await self._lookup_teams(league)
+            for item in items:
+                if item.value == team_id:
+                    return item.label
+        except Exception:
+            pass
+        return None
 
     async def fetch(
         self,
@@ -227,63 +167,29 @@ class ASAAdapter(DataAdapter):
         end: datetime.date | None = None,
     ) -> TimeSeries:
         parts = query.split(":")
-        if len(parts) < 4 or len(parts) > 6:
+        if len(parts) < 3 or len(parts) > 5:
             raise ValueError(
                 f"Invalid query format: '{query}'. "
-                "Expected 'league:entity_type:entity_id:metric[:home_away:stage]' "
-                "(e.g. 'mls:teams:jYQJ19EqGR:xgoals_for')"
+                "Expected 'league:team_id:metric[:home_away:stage]' "
+                "(e.g. 'mls:jYQJ19EqGR:xgoals_for')"
             )
 
-        league, entity_type, entity_id, metric = parts[:4]
-        home_away = parts[4] if len(parts) > 4 else "all"
-        stage = parts[5] if len(parts) > 5 else "all"
+        league, team_id, metric = parts[:3]
+        home_away = parts[3] if len(parts) > 3 else "all"
+        stage = parts[4] if len(parts) > 4 else "all"
 
         if metric not in METRIC_ENDPOINT:
-            available = ALL_PLAYER_METRICS if entity_type == "players" else ALL_METRICS
             raise ValueError(
-                f"Unknown metric: '{metric}'. Available: {', '.join(available)}"
+                f"Unknown metric: '{metric}'. Available: {', '.join(ALL_METRICS)}"
             )
 
         endpoint_category = METRIC_ENDPOINT[metric]
 
-        if entity_type == "players":
-            # Players: fetch metric data first to discover team_id for game lookup
-            metric_data = await self._fetch_metric_data(
-                league, entity_type, entity_id, endpoint_category
-            )
-            if not metric_data:
-                return TimeSeries(
-                    source=self.name,
-                    query=query,
-                    points=[],
-                    metadata={
-                        "league": league,
-                        "entity_type": entity_type,
-                        "entity_id": entity_id,
-                        "metric": metric,
-                        "metric_label": METRIC_LABELS.get(metric, metric),
-                        "home_away": home_away,
-                        "stage": stage,
-                    },
-                )
-            # Get team_id(s) from metric data rows
-            team_ids = {
-                row["team_id"] for row in metric_data if row.get("team_id")
-            }
-            game_dates: dict[str, datetime.date] = {}
-            for tid in team_ids:
-                dates = await self._fetch_game_dates(
-                    league, "teams", tid, home_away=home_away, stage=stage
-                )
-                game_dates.update(dates)
-        else:
-            # Teams: fetch games first, then metric data
-            game_dates = await self._fetch_game_dates(
-                league, entity_type, entity_id, home_away=home_away, stage=stage
-            )
-            metric_data = await self._fetch_metric_data(
-                league, entity_type, entity_id, endpoint_category
-            )
+        # Fetch games and metric data
+        game_dates = await self._fetch_game_dates(
+            league, team_id, home_away=home_away, stage=stage
+        )
+        metric_data = await self._fetch_metric_data(league, team_id, endpoint_category)
 
         # Build time series by joining on game_id
         points = []
@@ -303,38 +209,39 @@ class ASAAdapter(DataAdapter):
         if end:
             points = [p for p in points if p.date <= end]
 
+        # Look up team name for better display
+        team_name = await self._get_team_name(league, team_id)
+
+        # Build metadata
+        meta = {
+            "league": league,
+            "team_id": team_id,
+            "metric": metric,
+            "metric_label": METRIC_LABELS.get(metric, metric),
+            "home_away": home_away,
+            "stage": stage,
+        }
+        if team_name:
+            meta["team"] = team_name
+
         return TimeSeries(
             source=self.name,
             query=query,
             points=points,
-            metadata={
-                "league": league,
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "metric": metric,
-                "metric_label": METRIC_LABELS.get(metric, metric),
-                "home_away": home_away,
-                "stage": stage,
-            },
+            metadata=meta,
         )
 
     async def _fetch_game_dates(
         self,
         league: str,
-        entity_type: str,
-        entity_id: str,
+        team_id: str,
         *,
         home_away: str = "all",
         stage: str = "all",
     ) -> dict[str, datetime.date]:
-        """Fetch games and return a mapping of game_id -> date.
-
-        Filters games by venue (home/away) and stage (regular/playoffs).
-        """
+        """Fetch games and return a mapping of game_id -> date."""
         url = f"{ASA_API_URL}/{league}/games"
-        params: dict[str, str] = {}
-        if entity_type == "teams":
-            params["team_id"] = entity_id
+        params = {"team_id": team_id}
 
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, timeout=30.0)
@@ -343,7 +250,7 @@ class ASAAdapter(DataAdapter):
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
                     raise ValueError(
-                        f"Games not found for '{entity_id}' in {league}"
+                        f"Games not found for team '{team_id}' in {league}"
                     ) from None
                 raise
 
@@ -353,9 +260,9 @@ class ASAAdapter(DataAdapter):
             game_id = game["game_id"]
 
             # Filter by home/away venue
-            if home_away == "home" and game.get("home_team_id") != entity_id:
+            if home_away == "home" and game.get("home_team_id") != team_id:
                 continue
-            if home_away == "away" and game.get("away_team_id") != entity_id:
+            if home_away == "away" and game.get("away_team_id") != team_id:
                 continue
 
             # Filter by stage (knockout_game flag from ASA API)
@@ -376,15 +283,13 @@ class ASAAdapter(DataAdapter):
     async def _fetch_metric_data(
         self,
         league: str,
-        entity_type: str,
-        entity_id: str,
+        team_id: str,
         endpoint_category: str,
     ) -> list[dict]:
         """Fetch metric data with split_by_games=true."""
-        url = f"{ASA_API_URL}/{league}/{entity_type}/{endpoint_category}"
-        id_param = "team_id" if entity_type == "teams" else "player_id"
+        url = f"{ASA_API_URL}/{league}/teams/{endpoint_category}"
         params = {
-            id_param: entity_id,
+            "team_id": team_id,
             "split_by_games": "true",
         }
 
@@ -395,7 +300,7 @@ class ASAAdapter(DataAdapter):
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
                     raise ValueError(
-                        f"Metric data not found for '{entity_id}' in {league}"
+                        f"Metric data not found for team '{team_id}' in {league}"
                     ) from None
                 raise
 

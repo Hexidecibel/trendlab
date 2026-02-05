@@ -41,6 +41,45 @@ Make it feel finished.
 
 Ship it.
 
+- [x] Add logging (structured JSON logs)
+- [x] Add request validation and rate limiting
+- [x] Write a `Dockerfile` and `docker-compose.yml` for one-command deployment
+- [x] Add CI pipeline config (GitHub Actions): lint, test, type-check on every push
+- [x] Add OpenAPI schema customization — clean descriptions for all endpoints
+- [x] Final README with architecture diagram, screenshots, and setup instructions
+
+---
+
+## Tier 5: New Adapters
+
+Expand data source coverage.
+
+- [ ] **CSV Upload adapter** — user uploads date/value CSV, instant analysis on custom data
+- [ ] **npm adapter** — JavaScript package downloads (mirrors PyPI pattern)
+- [ ] **Reddit adapter** — subreddit subscriber growth, post frequency
+- [x] **Wikipedia adapter** — page view trends for any article, multiple languages, access/agent filters
+- [x] **Stock/Finance adapter** — stock prices, ETFs, indices, crypto via Yahoo Finance (no auth)
+- [x] **Weather adapter** — historical weather data for any location via Open-Meteo (no auth)
+
+---
+
+## Tier 6: UX Enhancements
+
+Features that make the app shine.
+
+- [ ] **Correlation Explorer UI** — third tab with scatter plot, r-values, lag analysis (backend ready)
+- [ ] **Saved Views UI** — save/load/share buttons, "My Views" modal (backend ready)
+- [ ] **Export PNG** — download chart as image (Chart.js built-in)
+- [ ] **Forecast Accuracy Tracker** — store past forecasts, compare to actuals over time
+- [ ] **NL Insights Feed** — auto-generate headline summaries, "What's interesting today?" widget
+- [ ] **Export PDF Report** — analysis + forecast + insights as downloadable PDF
+
+---
+
+## Tier 7: Production & Ops
+
+Ship it.
+
 - [ ] Add logging (structured JSON logs)
 - [ ] Add request validation and rate limiting
 - [ ] Write a `Dockerfile` and `docker-compose.yml` for one-command deployment
@@ -50,7 +89,7 @@ Ship it.
 
 ---
 
-## Tier 5: Future
+## Tier 8: Future
 
 Post-v1 ideas.
 
@@ -58,9 +97,7 @@ Post-v1 ideas.
 - [ ] Add background task scheduling — periodic data refresh using FastAPI background tasks or APScheduler
 - [ ] Multi-tenant support — user accounts with personal watchlists
 - [ ] Webhook/Slack notifications when a watched trend crosses a threshold
-- [ ] More adapters: Spotify, npm, Reddit, crypto exchanges
 - [ ] LLM vs statistical forecast comparison — track where each method fails
-- [ ] Export reports as PDF
 - [ ] Plugin system for community-contributed adapters
 
 ---

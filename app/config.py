@@ -19,10 +19,15 @@ class Settings:
             "asa": 86400,  # 24 hours
             "github_stars": 3600,  # 1 hour
             "football": 86400,  # 24 hours
+            "wikipedia": 3600,  # 1 hour
+            "stocks": 900,  # 15 minutes (market data)
+            "weather": 86400,  # 24 hours (historical)
         }
         self.debug: str = os.environ.get("DEBUG", "true")
         self.host: str = os.environ.get("HOST", "0.0.0.0")
         self.port: int = int(os.environ.get("PORT", "8000"))
+        # Secret phrase for access control (None = no auth required)
+        self.secret_phrase: str | None = os.environ.get("TRENDLAB_SECRET_PHRASE")
 
 
 settings = Settings()

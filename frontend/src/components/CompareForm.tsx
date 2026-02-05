@@ -110,11 +110,14 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
 
       setLookupLoading((prev) => ({ ...prev, [cacheKey]: true }))
       try {
-        const items = await fetchLookup(
-          source,
-          field.name === 'entity' ? 'teams' : field.name,
-          depValue || undefined,
-        )
+        const lookupType = field.name === 'entity'
+          ? (fieldValues['entity_type'] || 'teams')
+          : field.name
+        const depends: Record<string, string> = {}
+        if (field.depends_on && depValue) {
+          depends[field.depends_on] = depValue
+        }
+        const items = await fetchLookup(source, lookupType, depends)
         setLookupCache((prev) => ({ ...prev, [cacheKey]: items }))
       } catch {
         // Silently fail
@@ -310,6 +313,7 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
                 <MenuItem value="month">Monthly</MenuItem>
                 <MenuItem value="quarter">Quarterly</MenuItem>
                 <MenuItem value="season">Seasonal</MenuItem>
+                <MenuItem value="year">Yearly</MenuItem>
               </Select>
             </FormControl>
             <Button type="submit" variant="contained" disabled={loading || !canSubmit}>

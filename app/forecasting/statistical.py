@@ -1,13 +1,13 @@
 """Statistical forecasting: AutoETS wrapper via statsforecast."""
 
 import datetime
-import logging
 
 import numpy as np
 
+from app.logging_config import get_logger
 from app.models.schemas import ForecastPoint, ModelForecast
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 MIN_SERIES_LENGTH = 7
 

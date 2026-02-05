@@ -1,9 +1,26 @@
+import { useRef } from 'react'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
 import Typography from '@mui/material/Typography'
+import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
+import type { ChartJS } from 'chart.js'
 import type { TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
+
+// Map resample frequency to Chart.js time unit
+type TimeUnit = 'day' | 'week' | 'month' | 'quarter' | 'year'
+function getTimeUnit(resample?: string): TimeUnit {
+  switch (resample) {
+    case 'week': return 'week'
+    case 'month': return 'month'
+    case 'quarter': return 'quarter'
+    case 'season': return 'quarter'
+    case 'year': return 'year'
+    default: return 'day'
+  }
+}
 
 interface Props {
   series: TimeSeries
@@ -12,6 +29,7 @@ interface Props {
   analysis?: TrendAnalysis | null
   showBreaks?: boolean
   showAnomalies?: boolean
+  resample?: string
 }
 
 export function ForecastChart({
@@ -21,7 +39,14 @@ export function ForecastChart({
   analysis,
   showBreaks = true,
   showAnomalies = true,
+  resample,
 }: Props) {
+  const chartRef = useRef<ChartJS<'line'>>(null)
+
+  const handleResetZoom = () => {
+    chartRef.current?.resetZoom()
+  }
+
   const modelForecast = forecast.forecasts.find(
     (f) => f.model_name === selectedModel,
   )
@@ -128,7 +153,7 @@ export function ForecastChart({
     scales: {
       x: {
         type: 'time' as const,
-        time: { unit: 'day' as const },
+        time: { unit: getTimeUnit(resample) },
         title: { display: true, text: 'Date' },
       },
       y: {
@@ -157,12 +182,26 @@ export function ForecastChart({
   return (
     <Card>
       <CardContent>
-        <Typography variant="subtitle2" gutterBottom>
-          Time Series & Forecast
-        </Typography>
-        <Box sx={{ height: 320 }}>
-          <Line data={data} options={options} />
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          <Typography variant="subtitle2">
+            Time Series & Forecast
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ZoomOutMapIcon />}
+            onClick={handleResetZoom}
+            sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+          >
+            Reset Zoom
+          </Button>
         </Box>
+        <Box sx={{ height: 320 }}>
+          <Line ref={chartRef} data={data} options={options} />
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          Tip: Drag to select a region to zoom in
+        </Typography>
       </CardContent>
     </Card>
   )

@@ -157,6 +157,7 @@ export interface CompareItem {
 
 export interface CompareResponse {
   series: TimeSeries[]
+  analyses?: TrendAnalysis[]
   count: number
 }
 
@@ -165,4 +166,23 @@ export interface NaturalQueryError {
     error: string
     suggestions: string[]
   }
+}
+
+// Rich data context for AI follow-up questions
+export interface DataContext {
+  data_points_count: number
+  date_range: string
+  min_value: number
+  max_value: number
+  mean_value: number
+  recent_values: Array<{ date: string; value: number }>
+  trend_direction: string
+  trend_momentum: number
+  anomaly_count: number
+  anomalies: Array<{ date: string; value: number; score: number }>
+  structural_breaks: Array<{ date: string; method: string }>
+  seasonality_detected: boolean
+  seasonality_period?: number
+  forecast_horizon?: number
+  forecast_values?: Array<{ date: string; value: number; lower_ci: number; upper_ci: number }>
 }

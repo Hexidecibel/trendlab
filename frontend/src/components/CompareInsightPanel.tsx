@@ -9,7 +9,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import SendIcon from '@mui/icons-material/Send'
 import ReactMarkdown from 'react-markdown'
-import type { TimeSeries, TrendAnalysis, ForecastComparison, DataContext } from '../api/types'
+import type { CompareItem, TimeSeries, TrendAnalysis, DataContext } from '../api/types'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -17,15 +17,14 @@ interface ChatMessage {
 }
 
 interface Props {
-  source: string
-  query: string
-  horizon: number
-  series?: TimeSeries
-  analysis?: TrendAnalysis
-  forecast?: ForecastComparison
+  items: CompareItem[]
+  resample?: string
+  apply?: string
+  seriesList?: TimeSeries[]
+  analyses?: TrendAnalysis[]
 }
 
-export function InsightPanel({ source, query, horizon, series, analysis, forecast }: Props) {
+export function CompareInsightPanel({ items, resample, apply, seriesList, analyses }: Props) {
   const [initialInsight, setInitialInsight] = useState('')
   const [status, setStatus] = useState<
     'idle' | 'loading' | 'streaming' | 'done' | 'unavailable' | 'error'
@@ -34,107 +33,165 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [followupStatus, setFollowupStatus] = useState<'idle' | 'streaming'>('idle')
-  const eventSourceRef = useRef<EventSource | null>(null)
   const gotDataRef = useRef(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  // Build data context from available data
-  const dataContext = useMemo((): DataContext | undefined => {
-    if (!series || !analysis) return undefined
+  // Build data contexts from available data
+  const dataContexts = useMemo((): DataContext[] | undefined => {
+    if (!seriesList || !analyses || seriesList.length === 0) return undefined
 
-    const points = series.points
-    if (points.length === 0) return undefined
+    return seriesList.map((series, i) => {
+      const analysis = analyses[i]
+      const points = series.points
+      if (points.length === 0 || !analysis) {
+        return {
+          data_points_count: 0,
+          date_range: '',
+          min_value: 0,
+          max_value: 0,
+          mean_value: 0,
+          recent_values: [],
+          trend_direction: 'unknown',
+          trend_momentum: 0,
+          anomaly_count: 0,
+          anomalies: [],
+          structural_breaks: [],
+          seasonality_detected: false,
+        }
+      }
 
-    const values = points.map((p) => p.value)
-    const minVal = Math.min(...values)
-    const maxVal = Math.max(...values)
-    const meanVal = values.reduce((a, b) => a + b, 0) / values.length
+      const values = points.map((p) => p.value)
+      const minVal = Math.min(...values)
+      const maxVal = Math.max(...values)
+      const meanVal = values.reduce((a, b) => a + b, 0) / values.length
 
-    const recommendedForecast = forecast?.forecasts.find(
-      (f) => f.model_name === forecast.recommended_model
-    )
-
-    return {
-      data_points_count: points.length,
-      date_range: `${points[0].date} to ${points[points.length - 1].date}`,
-      min_value: minVal,
-      max_value: maxVal,
-      mean_value: meanVal,
-      recent_values: points.slice(-10).map((p) => ({ date: p.date, value: p.value })),
-      trend_direction: analysis.trend.direction,
-      trend_momentum: analysis.trend.momentum,
-      anomaly_count: analysis.anomalies.anomaly_count,
-      anomalies: analysis.anomalies.anomalies.map((a) => ({
-        date: a.date,
-        value: a.value,
-        score: a.score,
-      })),
-      structural_breaks: analysis.structural_breaks.map((b) => ({
-        date: b.date,
-        method: b.method,
-      })),
-      seasonality_detected: analysis.seasonality.detected,
-      seasonality_period: analysis.seasonality.period_days ?? undefined,
-      forecast_horizon: forecast?.horizon,
-      forecast_values: recommendedForecast?.points.slice(0, 10).map((p) => ({
-        date: p.date,
-        value: p.value,
-        lower_ci: p.lower_ci,
-        upper_ci: p.upper_ci,
-      })),
-    }
-  }, [series, analysis, forecast])
+      return {
+        data_points_count: points.length,
+        date_range: `${points[0].date} to ${points[points.length - 1].date}`,
+        min_value: minVal,
+        max_value: maxVal,
+        mean_value: meanVal,
+        recent_values: points.slice(-5).map((p) => ({ date: p.date, value: p.value })),
+        trend_direction: analysis.trend.direction,
+        trend_momentum: analysis.trend.momentum,
+        anomaly_count: analysis.anomalies.anomaly_count,
+        anomalies: analysis.anomalies.anomalies.slice(0, 3).map((a) => ({
+          date: a.date,
+          value: a.value,
+          score: a.score,
+        })),
+        structural_breaks: analysis.structural_breaks.map((b) => ({
+          date: b.date,
+          method: b.method,
+        })),
+        seasonality_detected: analysis.seasonality.detected,
+        seasonality_period: analysis.seasonality.period_days ?? undefined,
+      }
+    })
+  }, [seriesList, analyses])
 
   // Scroll to bottom when messages change
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Load initial insight
   useEffect(() => {
-    eventSourceRef.current?.close()
+    if (items.length < 2) return
+
     setInitialInsight('')
     setMessages([])
     setStatus('loading')
     setErrorMsg('')
     gotDataRef.current = false
 
-    const params = new URLSearchParams({
-      source,
-      query,
-      horizon: String(horizon),
-    })
-    const es = new EventSource(`/api/insight?${params}`)
-    eventSourceRef.current = es
+    const controller = new AbortController()
 
-    es.addEventListener('delta', (e) => {
-      gotDataRef.current = true
-      setStatus('streaming')
-      setInitialInsight((prev) => prev + JSON.parse(e.data))
-    })
+    const fetchStream = async () => {
+      try {
+        const response = await fetch('/api/compare-insight', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items, resample, apply }),
+          signal: controller.signal,
+        })
 
-    es.addEventListener('complete', () => {
-      setStatus('done')
-      es.close()
-    })
+        if (!response.ok) {
+          if (response.status === 503) {
+            setStatus('unavailable')
+            return
+          }
+          throw new Error(`HTTP ${response.status}`)
+        }
 
-    es.addEventListener('error', (e) => {
-      if (e instanceof MessageEvent && e.data) {
-        setErrorMsg(JSON.parse(e.data))
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('No reader')
+
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let currentEvent = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+
+          const messages = buffer.split('\n\n')
+          buffer = messages.pop() || ''
+
+          for (const message of messages) {
+            const lines = message.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                currentEvent = line.slice(7).trim()
+              } else if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6)
+                if (currentEvent === 'delta') {
+                  gotDataRef.current = true
+                  setStatus('streaming')
+                  try {
+                    const data = JSON.parse(dataStr)
+                    if (typeof data === 'string') {
+                      setInitialInsight((prev) => prev + data)
+                    }
+                  } catch {
+                    // Ignore parse errors
+                  }
+                } else if (currentEvent === 'complete') {
+                  setStatus('done')
+                } else if (currentEvent === 'error') {
+                  setStatus('error')
+                  try {
+                    setErrorMsg(JSON.parse(dataStr))
+                  } catch {
+                    setErrorMsg(dataStr)
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (buffer.trim()) {
+          setStatus('done')
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return
+        if (!gotDataRef.current) {
+          setStatus('unavailable')
+        } else {
+          setStatus('error')
+          setErrorMsg(err instanceof Error ? err.message : String(err))
+        }
       }
-      setStatus('error')
-      es.close()
-    })
-
-    es.onerror = () => {
-      if (!gotDataRef.current) {
-        setStatus('unavailable')
-      }
-      es.close()
     }
 
-    return () => es.close()
-  }, [source, query, horizon])
+    fetchStream()
+
+    return () => {
+      controller.abort()
+    }
+  }, [items, resample, apply])
 
   const handleSendMessage = async () => {
     if (!input.trim() || followupStatus === 'streaming') return
@@ -144,22 +201,20 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }])
     setFollowupStatus('streaming')
 
-    // Build conversation for API
     const conversationMessages = [
       ...messages,
       { role: 'user', content: userMessage },
     ]
 
     try {
-      const response = await fetch('/api/insight-followup', {
+      const response = await fetch('/api/compare-insight-followup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source,
-          query,
+          items,
           messages: conversationMessages,
           context_summary: initialInsight,
-          data_context: dataContext,
+          data_contexts: dataContexts,
         }),
       })
 
@@ -174,7 +229,6 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
       let assistantMessage = ''
       let buffer = ''
 
-      // Add placeholder for assistant message
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
       while (true) {
@@ -205,7 +259,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
       }
     } catch (err) {
       setMessages((prev) => [
-        ...prev.slice(0, -1), // Remove placeholder
+        ...prev.slice(0, -1),
         { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
       ])
     } finally {
@@ -222,33 +276,34 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
 
   if (status === 'unavailable') {
     return (
-      <Card>
+      <Card sx={{ mt: 3 }}>
         <CardContent>
           <Typography variant="subtitle2" gutterBottom>
-            AI Commentary
+            AI Comparison
           </Typography>
           <Typography variant="caption" color="text.disabled" fontStyle="italic">
-            AI commentary is not available. Configure ANTHROPIC_API_KEY to enable.
+            AI comparison is not available. Configure ANTHROPIC_API_KEY to enable.
           </Typography>
         </CardContent>
       </Card>
     )
   }
 
+  if (status === 'idle' && items.length < 2) {
+    return null
+  }
+
   return (
-    <Card>
+    <Card sx={{ mt: 3 }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-          <Typography variant="subtitle2">AI Commentary</Typography>
+          <Typography variant="subtitle2">AI Comparison</Typography>
           {status === 'streaming' && (
             <Typography
               variant="caption"
               color="primary"
               sx={{
-                '@keyframes pulse': {
-                  '0%, 100%': { opacity: 1 },
-                  '50%': { opacity: 0.5 },
-                },
+                '@keyframes pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } },
                 animation: 'pulse 1.5s infinite',
               }}
             >
@@ -257,14 +312,12 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
           )}
           {status === 'loading' && (
             <Typography variant="caption" color="text.disabled">
-              connecting...
+              analyzing...
             </Typography>
           )}
         </Box>
 
-        {(status === 'loading' || status === 'streaming') && (
-          <LinearProgress sx={{ mb: 1 }} />
-        )}
+        {(status === 'loading' || status === 'streaming') && <LinearProgress sx={{ mb: 1 }} />}
 
         {status === 'error' && (
           <Typography variant="caption" color="error" display="block" sx={{ mb: 1 }}>
@@ -289,7 +342,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
           </Box>
         ) : (
           <Typography variant="body2" color="text.disabled" fontStyle="italic">
-            {status === 'loading' ? 'Connecting to AI...' : 'Waiting for data...'}
+            {status === 'loading' ? 'Analyzing series for comparison...' : 'Waiting...'}
           </Typography>
         )}
 
@@ -340,7 +393,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
           </Box>
         )}
 
-        {/* Input field - show after initial insight is done */}
+        {/* Input field */}
         {status === 'done' && (
           <Box sx={{ mt: 2, pt: messages.length === 0 ? 2 : 0, borderTop: messages.length === 0 ? 1 : 0, borderColor: 'divider' }}>
             <TextField

@@ -54,9 +54,7 @@ class FootballDataAdapter(DataAdapter):
             ),
         ]
 
-    async def lookup(
-        self, lookup_type: str, **kwargs: str
-    ) -> list[LookupItem]:
+    async def lookup(self, lookup_type: str, **kwargs: str) -> list[LookupItem]:
         if lookup_type != "teams":
             return []
 
@@ -70,15 +68,11 @@ class FootballDataAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
-                    raise ValueError(
-                        f"Competition '{competition}' not found"
-                    ) from None
+                    raise ValueError(f"Competition '{competition}' not found") from None
                 raise
 
         teams = response.json().get("teams", [])
-        return [
-            LookupItem(value=str(t["id"]), label=t["name"]) for t in teams
-        ]
+        return [LookupItem(value=str(t["id"]), label=t["name"]) for t in teams]
 
     async def fetch(
         self,

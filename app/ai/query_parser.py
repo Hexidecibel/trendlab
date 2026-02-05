@@ -2,11 +2,11 @@
 
 import datetime
 import json
-import logging
 
 from app.ai.client import LLMClient
 from app.config import settings
 from app.data.registry import registry
+from app.logging_config import get_logger
 from app.models.schemas import (
     LookupItem,
     NaturalCompareItem,
@@ -15,7 +15,7 @@ from app.models.schemas import (
     NaturalQueryResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_client(client: LLMClient | None) -> LLMClient:
@@ -162,7 +162,10 @@ async def resolve_entities(
             kwargs[ff.depends_on] = fields[ff.depends_on]
 
         # Map field name to lookup type
-        lookup_type = "teams" if ff.name == "entity" else ff.name
+        lookup_type = ff.name
+
+        # Pass the human name as search term for lookups that need it (e.g. Wikipedia)
+        kwargs["search"] = human_name
 
         lookup_items = await adapter.lookup(lookup_type, **kwargs)
 
@@ -224,7 +227,7 @@ RULES:
    "vs", "versus", "and" between two entities, "side by side"), return a compare
    response with 2-3 items instead of a single query. Max 3 items.
 9. RESAMPLE / TRANSFORM: If the user mentions aggregation (weekly, monthly,
-   quarterly, seasonal), set "resample" to "week", "month", "quarter", or "season".
+   quarterly, seasonal, yearly/annual), set "resample" to "week", "month", "quarter", "season", or "year".
    If they mention transforms (normalize, rolling average, percentage change),
    set "apply" to a pipe-delimited string (e.g. "rolling_avg_7d|normalize").
    Default both to null.
@@ -239,10 +242,9 @@ Response: {{"source": "pypi", "fields": {{"query": "fastapi"}}, "horizon": 14, \
 "interpretation": "PyPI download counts for the fastapi package"}}
 
 Query: "Seattle Sounders expected goals at home this season"
-Response: {{"source": "asa", "fields": {{"league": "mls", "entity_type": "teams", \
-"entity": "Seattle Sounders FC", "metric": "xgoals_for", "home_away": "home", \
-"stage": "regular"}}, "horizon": 14, "start": "{year}-01-01", "end": null, \
-"resample": null, "apply": null, \
+Response: {{"source": "asa", "fields": {{"league": "mls", "team": "Seattle Sounders FC", \
+"metric": "xgoals_for", "home_away": "home", "stage": "regular"}}, "horizon": 14, \
+"start": "{year}-01-01", "end": null, "resample": null, "apply": null, \
 "interpretation": "Expected goals (xG) for Seattle Sounders FC in home MLS \
 regular season games this season"}}
 
@@ -271,12 +273,12 @@ Response: {{"compare": true, "items": [\
 
 Query: "Seattle Sounders vs LA Galaxy xG this season"
 Response: {{"compare": true, "items": [\
-{{"source": "asa", "fields": {{"league": "mls", "entity_type": "teams", \
-"entity": "Seattle Sounders FC", "metric": "xgoals_for", "home_away": "all", \
-"stage": "regular"}}, "start": "{year}-01-01", "end": null}}, \
-{{"source": "asa", "fields": {{"league": "mls", "entity_type": "teams", \
-"entity": "LA Galaxy", "metric": "xgoals_for", "home_away": "all", \
-"stage": "regular"}}, "start": "{year}-01-01", "end": null}}], \
+{{"source": "asa", "fields": {{"league": "mls", "team": "Seattle Sounders FC", \
+"metric": "xgoals_for", "home_away": "all", "stage": "regular"}}, \
+"start": "{year}-01-01", "end": null}}, \
+{{"source": "asa", "fields": {{"league": "mls", "team": "LA Galaxy", \
+"metric": "xgoals_for", "home_away": "all", "stage": "regular"}}, \
+"start": "{year}-01-01", "end": null}}], \
 "resample": null, \
 "interpretation": "Comparing expected goals for Seattle Sounders FC vs LA Galaxy \
 in MLS regular season this season"}}"""
@@ -291,7 +293,7 @@ Respond with JSON:
 {{"source": "<source_name>", "fields": {{<field_name>: <value>, ...}}, \
 "horizon": <integer>, "start": "<YYYY-MM-DD or null>", \
 "end": "<YYYY-MM-DD or null>", \
-"resample": "<week|month|quarter|season or null>", \
+"resample": "<week|month|quarter|season|year or null>", \
 "apply": "<pipe-delimited transforms or null>", \
 "interpretation": "<one sentence explaining what you understood>"}}
 

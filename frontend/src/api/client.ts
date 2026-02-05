@@ -76,14 +76,12 @@ export async function fetchForecast(
 export async function fetchLookup(
   source: string,
   lookupType: string,
-  league?: string,
-  season?: string,
+  depends?: Record<string, string>,
 ): Promise<LookupItem[]> {
   const qs = buildParams({
     source,
     lookup_type: lookupType,
-    league,
-    season,
+    ...depends,
   })
   return fetchJson(`/api/lookup?${qs}`)
 }

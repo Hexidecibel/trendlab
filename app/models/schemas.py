@@ -225,6 +225,7 @@ class CompareRequest(BaseModel):
 
 class CompareResponse(BaseModel):
     series: list[TimeSeries]
+    analyses: list["TrendAnalysis"] | None = None
     count: int
 
 
@@ -291,3 +292,58 @@ class SavedViewResponse(BaseModel):
     apply: str | None = None
     anomaly_method: str
     created_at: datetime.datetime
+
+
+# --- Chat Follow-up models ---
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class DataContext(BaseModel):
+    """Rich context about the data for follow-up questions."""
+    # Basic info
+    data_points_count: int
+    date_range: str  # e.g., "2024-01-01 to 2024-12-31"
+
+    # Statistics
+    min_value: float
+    max_value: float
+    mean_value: float
+    recent_values: list[dict]  # Last 5-10 data points [{date, value}, ...]
+
+    # Trend analysis
+    trend_direction: str  # rising, falling, stable
+    trend_momentum: float
+
+    # Anomalies
+    anomaly_count: int
+    anomalies: list[dict]  # [{date, value, zscore}, ...]
+
+    # Structural breaks
+    structural_breaks: list[dict]  # [{date, method}, ...]
+
+    # Seasonality
+    seasonality_detected: bool
+    seasonality_period: int | None = None
+
+    # Forecast (optional)
+    forecast_horizon: int | None = None
+    forecast_values: list[dict] | None = None  # [{date, value, lower_ci, upper_ci}, ...]
+
+
+class InsightFollowupRequest(BaseModel):
+    source: str
+    query: str
+    messages: list[ChatMessage]  # Conversation history
+    context_summary: str  # The initial AI insight summary
+    data_context: DataContext | None = None  # Rich data context
+
+
+class CompareInsightFollowupRequest(BaseModel):
+    items: list[CompareItem]
+    messages: list[ChatMessage]  # Conversation history
+    context_summary: str  # The initial AI comparison summary
+    data_contexts: list[DataContext] | None = None  # Rich context for each series

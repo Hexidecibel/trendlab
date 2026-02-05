@@ -535,9 +535,7 @@ class TestASAPlayerQueries:
                 _mock_response(MOCK_GAMES),
             ]
 
-            ts = await adapter.fetch(
-                "mls:players:p1abc:pass_completion_percentage"
-            )
+            ts = await adapter.fetch("mls:players:p1abc:pass_completion_percentage")
             assert len(ts.points) == 1
             assert ts.points[0].value == 0.82
 

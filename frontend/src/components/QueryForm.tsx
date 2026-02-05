@@ -10,8 +10,10 @@ import IconButton from '@mui/material/IconButton'
 import Link from '@mui/material/Link'
 import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
+import Slider from '@mui/material/Slider'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
+import Typography from '@mui/material/Typography'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import type { DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
@@ -97,18 +99,27 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
       if (field.field_type !== 'autocomplete') return
 
       const depValue = field.depends_on ? fieldValues[field.depends_on] : ''
-      const cacheKey = `${source}:${field.name}:${depValue}`
+      // For entity field, also factor in entity_type to cache key
+      const entityType = fieldValues['entity_type'] || ''
+      const cacheKey = field.name === 'entity'
+        ? `${source}:${field.name}:${depValue}:${entityType}`
+        : `${source}:${field.name}:${depValue}`
 
       if (lookupCache[cacheKey] || lookupLoading[cacheKey]) return
       if (field.depends_on && !depValue) return
 
       setLookupLoading((prev) => ({ ...prev, [cacheKey]: true }))
       try {
-        const items = await fetchLookup(
-          source,
-          field.name === 'entity' ? 'teams' : field.name,
-          depValue || undefined,
-        )
+        // Use entity_type value (teams/players) for lookup type
+        const lookupType = field.name === 'entity'
+          ? (fieldValues['entity_type'] || 'teams')
+          : field.name
+        // Build depends object with actual field name as key
+        const depends: Record<string, string> = {}
+        if (field.depends_on && depValue) {
+          depends[field.depends_on] = depValue
+        }
+        const items = await fetchLookup(source, lookupType, depends)
         setLookupCache((prev) => ({ ...prev, [cacheKey]: items }))
       } catch {
         // Silently fail
@@ -150,10 +161,15 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
   const setField = (name: string, value: string) => {
     setFieldValues((prev) => {
       const next = { ...prev, [name]: value }
+      // Clear dependent fields
       for (const f of formFields) {
         if (f.depends_on === name) {
           next[f.name] = ''
         }
+      }
+      // Also clear entity when entity_type changes
+      if (name === 'entity_type') {
+        next['entity'] = ''
       }
       return next
     })
@@ -161,7 +177,10 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
 
   const getLookupItems = (field: FormField): LookupItem[] => {
     const depValue = field.depends_on ? fieldValues[field.depends_on] : ''
-    const cacheKey = `${source}:${field.name}:${depValue}`
+    const entityType = fieldValues['entity_type'] || ''
+    const cacheKey = field.name === 'entity'
+      ? `${source}:${field.name}:${depValue}:${entityType}`
+      : `${source}:${field.name}:${depValue}`
     return lookupCache[cacheKey] || []
   }
 
@@ -266,15 +285,26 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
             {formFields.map(renderField)}
 
             {source && (
-              <TextField
-                size="small"
-                label="Horizon"
-                type="number"
-                value={horizon}
-                onChange={(e) => setHorizon(Number(e.target.value))}
-                slotProps={{ htmlInput: { min: 1, max: 365 } }}
-                sx={{ width: 100 }}
-              />
+              <Box sx={{ width: 180, px: 1 }}>
+                <Typography variant="caption" color="text.secondary" gutterBottom>
+                  Forecast: {horizon} days
+                </Typography>
+                <Slider
+                  size="small"
+                  value={horizon}
+                  onChange={(_, v) => setHorizon(v as number)}
+                  min={7}
+                  max={90}
+                  step={7}
+                  marks={[
+                    { value: 7, label: '7' },
+                    { value: 30, label: '30' },
+                    { value: 60, label: '60' },
+                    { value: 90, label: '90' },
+                  ]}
+                  valueLabelDisplay="auto"
+                />
+              </Box>
             )}
 
             {source && (
@@ -290,6 +320,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
                   <MenuItem value="month">Monthly</MenuItem>
                   <MenuItem value="quarter">Quarterly</MenuItem>
                   <MenuItem value="season">Seasonal</MenuItem>
+                  <MenuItem value="year">Yearly</MenuItem>
                 </Select>
               </FormControl>
             )}

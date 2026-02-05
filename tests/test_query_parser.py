@@ -384,8 +384,10 @@ class TestParseAndResolve:
 
     @pytest.mark.asyncio
     async def test_missing_api_key_raises(self):
-        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
-            await parse_and_resolve("test", client=None)
+        with patch("app.ai.query_parser.settings") as mock_settings:
+            mock_settings.anthropic_api_key = None
+            with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+                await parse_and_resolve("test", client=None)
 
     @pytest.mark.asyncio
     async def test_date_parsing(self):

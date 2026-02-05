@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from app.models.schemas import DataPoint, TimeSeries
 
-_VALID_FREQS = {"day", "week", "month", "quarter", "season"}
+_VALID_FREQS = {"day", "week", "month", "quarter", "season", "year"}
 
 
 def _week_bucket(d: datetime.date) -> datetime.date:
@@ -24,11 +24,16 @@ def _season_bucket(d: datetime.date) -> datetime.date:
     return datetime.date(d.year, 1, 1)
 
 
+def _year_bucket(d: datetime.date) -> datetime.date:
+    return datetime.date(d.year, 1, 1)
+
+
 _BUCKET_FN = {
     "week": _week_bucket,
     "month": _month_bucket,
     "quarter": _quarter_bucket,
     "season": _season_bucket,
+    "year": _year_bucket,
 }
 
 
