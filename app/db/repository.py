@@ -9,6 +9,7 @@ from app.db.models import (
     AnalysisRecord,
     ForecastRecord,
     ForecastSnapshot,
+    NotificationConfig,
     QueryConfig,
     SavedView,
     SeriesRecord,
@@ -541,3 +542,71 @@ async def delete_watchlist_item(item_id: int) -> bool:
         await session.delete(record)
         await session.commit()
         return True
+
+
+# --- Notification Config ---
+
+
+class NotificationConfigResponse:
+    """Lightweight response object for notification config."""
+
+    def __init__(
+        self,
+        webhook_url: str,
+        channel: str,
+        enabled: bool,
+        created_at: datetime.datetime,
+    ):
+        self.webhook_url = webhook_url
+        self.channel = channel
+        self.enabled = enabled
+        self.created_at = created_at
+
+
+async def get_notification_config() -> NotificationConfigResponse | None:
+    """Return the first (and only) notification config, or None."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(NotificationConfig).limit(1)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
+        return NotificationConfigResponse(
+            webhook_url=record.webhook_url,
+            channel=record.channel or "generic",
+            enabled=bool(record.enabled),
+            created_at=record.created_at,
+        )
+
+
+async def save_notification_config(
+    webhook_url: str,
+    channel: str = "generic",
+    enabled: bool = True,
+) -> NotificationConfigResponse:
+    """Upsert the single notification config row."""
+    async with _engine_mod.async_session() as session:
+        stmt = select(NotificationConfig).limit(1)
+        result = await session.execute(stmt)
+        record = result.scalar_one_or_none()
+
+        if record:
+            record.webhook_url = webhook_url
+            record.channel = channel
+            record.enabled = enabled
+        else:
+            record = NotificationConfig(
+                webhook_url=webhook_url,
+                channel=channel,
+                enabled=enabled,
+            )
+            session.add(record)
+
+        await session.commit()
+        await session.refresh(record)
+        return NotificationConfigResponse(
+            webhook_url=record.webhook_url,
+            channel=record.channel or "generic",
+            enabled=bool(record.enabled),
+            created_at=record.created_at,
+        )

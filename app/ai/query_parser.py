@@ -9,6 +9,7 @@ from app.data.registry import registry
 from app.logging_config import get_logger
 from app.models.schemas import (
     LookupItem,
+    NaturalAlertResponse,
     NaturalCompareItem,
     NaturalCompareResponse,
     NaturalQueryError,
@@ -223,16 +224,30 @@ RULES:
    - "last 30 days" → start = appropriate date
    - "last 6 months" / "last year" → start = appropriate date
    - "this year" → start = {year}-01-01
-   - "this season" for sports (ASA) → set start and end to null (the API already returns current season data)
+   - "this season" for sports (ASA) → set start and end to null \
+(the API already returns current season data)
    - If no date mentioned, set start and end to null.
 8. COMPARE INTENT: If the user wants to compare multiple items (keywords: "compare",
    "vs", "versus", "and" between two entities, "side by side"), return a compare
    response with 2-3 items instead of a single query. Max 3 items.
 9. RESAMPLE / TRANSFORM: If the user mentions aggregation (weekly, monthly,
-   quarterly, seasonal, yearly/annual), set "resample" to "week", "month", "quarter", "season", or "year".
+   quarterly, seasonal, yearly/annual), set "resample" to \
+"week", "month", "quarter", "season", or "year".
    If they mention transforms (normalize, rolling average, percentage change),
    set "apply" to a pipe-delimited string (e.g. "rolling_avg_7d|normalize").
    Default both to null.
+10. ALERT INTENT: If the user wants to be notified about future conditions \
+(keywords: "alert me when", "tell me when", "notify me when", \
+"let me know when", "watch for"), return an alert response. \
+IMPORTANT: distinguish from past tense — "show me when X happened" or \
+"tell me when X went above" (past tense) is a regular query, NOT an alert. \
+Only future-intent phrases are alerts. Extract:
+   - source and fields (same as regular queries)
+   - threshold_direction: "above" or "below" (also: "exceeds"/"over" → "above", \
+"drops below"/"under"/"falls below" → "below")
+   - threshold_value: numeric (handle abbreviations: "50k" → 50000, \
+"1M" → 1000000, "2.5k" → 2500)
+   - name: a short descriptive name for the watchlist item
 
 {catalog}
 
@@ -244,7 +259,8 @@ Response: {{"source": "pypi", "fields": {{"query": "fastapi"}}, "horizon": 14, \
 "interpretation": "PyPI download counts for the fastapi package"}}
 
 Query: "Seattle Sounders expected goals at home this season"
-Response: {{"source": "asa", "fields": {{"league": "mls", "team": "Seattle Sounders FC", \
+Response: {{"source": "asa", "fields": {{"league": "mls", \
+"team": "Seattle Sounders FC", \
 "metric": "xgoals_for", "home_away": "home", "stage": "regular"}}, "horizon": 14, \
 "start": null, "end": null, "resample": null, "apply": null, \
 "interpretation": "Expected goals (xG) for Seattle Sounders FC in home MLS \
@@ -283,7 +299,27 @@ Response: {{"compare": true, "items": [\
 "start": null, "end": null}}], \
 "resample": null, \
 "interpretation": "Comparing expected goals for Seattle Sounders FC vs LA Galaxy \
-in MLS regular season this season"}}"""
+in MLS regular season this season"}}
+
+Query: "alert me when bitcoin goes above 50000"
+Response: {{"alert": true, "source": "crypto", \
+"fields": {{"query": "bitcoin"}}, \
+"threshold_direction": "above", "threshold_value": 50000, \
+"name": "Bitcoin above $50,000", \
+"interpretation": "Alert when Bitcoin price exceeds $50,000"}}
+
+Query: "tell me when fastapi downloads drop below 1M"
+Response: {{"alert": true, "source": "pypi", \
+"fields": {{"query": "fastapi"}}, \
+"threshold_direction": "below", "threshold_value": 1000000, \
+"name": "FastAPI downloads below 1M", \
+"interpretation": "Alert when FastAPI weekly downloads fall below 1,000,000"}}
+
+Query: "show me when bitcoin went above 50000"
+Response: {{"source": "crypto", "fields": {{"query": "bitcoin"}}, \
+"horizon": 14, "start": null, "end": null, "resample": null, \
+"apply": null, \
+"interpretation": "Bitcoin price history (looking for when it exceeded $50,000)"}}"""
 
 USER_PROMPT_TEMPLATE = """\
 Parse this natural language query into structured parameters.
@@ -304,6 +340,12 @@ If the user wants to COMPARE multiple items, respond with:
 {{"source": "<source>", "fields": {{...}}, "start": "<YYYY-MM-DD or null>", \
 "end": "<YYYY-MM-DD or null>"}}, ...], \
 "resample": "<frequency or null>", \
+"interpretation": "<one sentence>"}}
+
+If the user wants an ALERT (future-intent notification), respond with:
+{{"alert": true, "source": "<source>", "fields": {{...}}, \
+"threshold_direction": "<above|below>", \
+"threshold_value": <number>, "name": "<short name>", \
 "interpretation": "<one sentence>"}}
 
 If you cannot parse the query, respond with:
@@ -374,10 +416,52 @@ async def _handle_compare(
     )
 
 
+async def _handle_alert(
+    parsed: dict,
+) -> NaturalAlertResponse | NaturalQueryError:
+    """Handle alert-intent responses from the LLM."""
+    source = parsed.get("source", "")
+    try:
+        registry.get(source)
+    except KeyError:
+        available = ", ".join(
+            s.name for s in registry.list_sources()
+        )
+        return NaturalQueryError(
+            error=f"Unknown data source: '{source}'",
+            suggestions=[f"Available sources: {available}"],
+        )
+
+    fields = parsed.get("fields", {})
+    try:
+        resolved = await resolve_entities(source, fields)
+    except ValueError as e:
+        return NaturalQueryError(error=str(e))
+
+    query_string = build_query_string(source, resolved)
+    direction = parsed.get("threshold_direction", "above")
+    value = parsed.get("threshold_value", 0)
+    name = parsed.get("name", f"{source} alert")
+
+    return NaturalAlertResponse(
+        source=source,
+        query=query_string,
+        threshold_direction=direction,
+        threshold_value=float(value),
+        name=name,
+        interpretation=parsed.get("interpretation", ""),
+    )
+
+
 async def parse_and_resolve(
     text: str,
     client: LLMClient | None = None,
-) -> NaturalQueryResponse | NaturalCompareResponse | NaturalQueryError:
+) -> (
+    NaturalQueryResponse
+    | NaturalCompareResponse
+    | NaturalAlertResponse
+    | NaturalQueryError
+):
     """Full pipeline: parse natural language, resolve entities, build query."""
     llm = _get_client(client)
 
@@ -410,6 +494,10 @@ async def parse_and_resolve(
     # 4. Check for compare intent
     if parsed.get("compare"):
         return await _handle_compare(parsed)
+
+    # 4b. Check for alert intent
+    if parsed.get("alert"):
+        return await _handle_alert(parsed)
 
     # 5. Check for LLM-reported error
     if "error" in parsed:

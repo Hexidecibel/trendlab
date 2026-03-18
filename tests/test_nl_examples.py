@@ -3,8 +3,11 @@
 import pytest
 
 from app.ai.query_parser import parse_and_resolve
-from app.models.schemas import NaturalCompareResponse, NaturalQueryError, NaturalQueryResponse
-
+from app.models.schemas import (
+    NaturalCompareResponse,
+    NaturalQueryError,
+    NaturalQueryResponse,
+)
 
 # Example queries from NaturalQueryInput.tsx
 EXAMPLE_QUERIES = [
@@ -12,7 +15,7 @@ EXAMPLE_QUERIES = [
     ("Seattle Sounders vs Portland Timbers xG this season", "compare"),
     ("LAFC expected goals at home, monthly", "single"),
     ("Inter Miami xPass completion by season", "single"),
-    ("Compare Jordan Morris and Raul Ruidiaz xGoals this season", "compare"),
+    ("Compare Seattle Sounders and LAFC xGoals this season", "compare"),
     # Stocks & Finance
     ("Tesla stock price last 6 months, weekly", "single"),
     ("Compare Apple and Microsoft stock prices this year", "compare"),
@@ -40,14 +43,20 @@ async def test_example_query_parses(query: str, expected_type: str):
     result = await parse_and_resolve(query)
 
     # Should not be an error
-    assert not isinstance(result, NaturalQueryError), f"Query '{query}' failed: {result.error}"
+    assert not isinstance(result, NaturalQueryError), (
+        f"Query '{query}' failed: {result.error}"
+    )
 
     # Check correct response type
     if expected_type == "compare":
-        assert isinstance(result, NaturalCompareResponse), f"Expected compare response for '{query}'"
+        assert isinstance(result, NaturalCompareResponse), (
+            f"Expected compare response for '{query}'"
+        )
         assert len(result.items) >= 2, f"Compare should have 2+ items for '{query}'"
     else:
-        assert isinstance(result, NaturalQueryResponse), f"Expected single response for '{query}'"
+        assert isinstance(result, NaturalQueryResponse), (
+            f"Expected single response for '{query}'"
+        )
         assert result.source, f"Missing source for '{query}'"
         assert result.query, f"Missing query string for '{query}'"
 

@@ -1,6 +1,7 @@
 import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -108,7 +109,8 @@ class ForecastSnapshot(Base):
     forecast_date = Column(Date, nullable=False)  # Date when forecast was made
     horizon = Column(Integer, nullable=False)
     model_name = Column(String, nullable=False)
-    predictions_json = Column(Text, nullable=False)  # [{date, value, lower_ci, upper_ci}, ...]
+    # [{date, value, lower_ci, upper_ci}, ...]
+    predictions_json = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
 
@@ -129,3 +131,13 @@ class WatchlistItem(Base):
     __table_args__ = (
         UniqueConstraint("source", "query", name="uq_watchlist_source_query"),
     )
+
+
+class NotificationConfig(Base):
+    __tablename__ = "notification_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    webhook_url = Column(String, nullable=False)
+    channel = Column(String, default="generic")  # slack, discord, generic
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)

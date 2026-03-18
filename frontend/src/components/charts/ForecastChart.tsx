@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -8,7 +8,8 @@ import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
 import type { ChartJS } from 'chart.js'
-import type { TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
+import { fetchEventContext } from '../../api/client'
+import type { EventContext, TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
 
 // Map resample frequency to Chart.js time unit
 type TimeUnit = 'day' | 'week' | 'month' | 'quarter' | 'year'
@@ -41,7 +42,14 @@ interface Props {
   analysis?: TrendAnalysis | null
   showBreaks?: boolean
   showAnomalies?: boolean
+  showRegimes?: boolean
   resample?: string
+}
+
+const REGIME_COLORS: Record<string, string> = {
+  rising: 'rgba(34, 197, 94, 0.08)',
+  falling: 'rgba(239, 68, 68, 0.08)',
+  stable: 'rgba(156, 163, 175, 0.08)',
 }
 
 export function ForecastChart({
@@ -51,9 +59,30 @@ export function ForecastChart({
   analysis,
   showBreaks = true,
   showAnomalies = true,
+  showRegimes = true,
   resample,
 }: Props) {
   const chartRef = useRef<ChartJS<'line'>>(null)
+  const [eventMap, setEventMap] = useState<Record<string, EventContext>>({})
+
+  // Fetch event context for anomaly dates
+  useEffect(() => {
+    if (!analysis || !showAnomalies || analysis.anomalies.anomalies.length === 0) {
+      return
+    }
+    const dates = analysis.anomalies.anomalies.slice(0, 5).map((a) => a.date)
+    fetchEventContext(analysis.source, analysis.query, dates)
+      .then((events) => {
+        const map: Record<string, EventContext> = {}
+        for (const ev of events) {
+          map[ev.date] = ev
+        }
+        setEventMap(map)
+      })
+      .catch(() => {
+        // Best-effort: ignore failures
+      })
+  }, [analysis, showAnomalies])
 
   const handleResetZoom = () => {
     chartRef.current?.resetZoom()
@@ -153,6 +182,10 @@ export function ForecastChart({
 
   if (analysis && showAnomalies) {
     analysis.anomalies.anomalies.forEach((a, i) => {
+      const ev = eventMap[a.date]
+      const labelContent = ev
+        ? [`Anomaly: ${a.value.toFixed(1)}`, ev.headline.slice(0, 60)]
+        : [`Anomaly: ${a.value.toFixed(1)}`]
       annotations[`anomaly-${i}`] = {
         type: 'point',
         xValue: a.date,
@@ -161,6 +194,41 @@ export function ForecastChart({
         backgroundColor: 'rgba(239, 68, 68, 0.4)',
         borderColor: 'rgb(239, 68, 68)',
         borderWidth: 2,
+        label: {
+          display: false,
+          content: labelContent,
+          backgroundColor: 'rgba(30, 30, 30, 0.9)',
+          color: '#fff',
+          font: { size: 10 },
+          padding: 4,
+        },
+        enter({ element }: { element: { label: { options: { display: boolean } } } }) {
+          element.label.options.display = true
+          return true
+        },
+        leave({ element }: { element: { label: { options: { display: boolean } } } }) {
+          element.label.options.display = false
+          return true
+        },
+      }
+    })
+  }
+
+  if (analysis && showRegimes && analysis.regimes && analysis.regimes.length > 0) {
+    analysis.regimes.forEach((regime, i) => {
+      annotations[`regime-${i}`] = {
+        type: 'box',
+        xMin: regime.start_date,
+        xMax: regime.end_date,
+        backgroundColor: REGIME_COLORS[regime.label] || REGIME_COLORS.stable,
+        borderWidth: 0,
+        label: {
+          display: true,
+          content: regime.label,
+          position: { x: 'center', y: 'start' },
+          color: 'rgba(100, 100, 100, 0.6)',
+          font: { size: 9 },
+        },
       }
     })
   }

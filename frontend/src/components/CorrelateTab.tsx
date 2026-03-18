@@ -1,5 +1,4 @@
 import { useState, useRef } from 'react'
-import Alert from '@mui/material/Alert'
 import Autocomplete from '@mui/material/Autocomplete'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -27,7 +26,8 @@ import {
   Legend,
 } from 'chart.js'
 import type { CorrelateResponse, DataSourceInfo, LookupItem } from '../api/types'
-import { fetchCorrelate, fetchLookup } from '../api/client'
+import { ApiError, fetchCorrelate, fetchLookup } from '../api/client'
+import { ErrorAlert } from './ErrorAlert'
 
 // Register Chart.js components
 ChartJSClass.register(LinearScale, PointElement, LineElement, BarElement, CategoryScale, Tooltip, Legend)
@@ -46,7 +46,7 @@ export function CorrelateTab({ sources }: Props) {
   const [seriesB, setSeriesB] = useState<SeriesInput>({ source: '', query: '' })
   const [resample, setResample] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | ApiError | null>(null)
   const [result, setResult] = useState<CorrelateResponse | null>(null)
   const [lookupA, setLookupA] = useState<LookupItem[]>([])
   const [lookupB, setLookupB] = useState<LookupItem[]>([])
@@ -91,7 +91,7 @@ export function CorrelateTab({ sources }: Props) {
       })
       setResult(response)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof ApiError ? err : err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -233,11 +233,7 @@ export function CorrelateTab({ sources }: Props) {
         </CardContent>
       </Card>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
+      {error && <ErrorAlert error={error} />}
 
       {loading && (
         <Box sx={{ textAlign: 'center', py: 6 }}>

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
@@ -14,7 +13,8 @@ import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
 import { useApi } from '../hooks/useApi'
-import { fetchCompare } from '../api/client'
+import { useWebSocket } from '../hooks/useWebSocket'
+import { ApiError, fetchCompare } from '../api/client'
 import type { CompareItem, NaturalCompareItem, TimeSeries, TrendAnalysis } from '../api/types'
 import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
@@ -28,6 +28,8 @@ import { AnalysisPanel } from './AnalysisPanel'
 import { EvaluationTable } from './EvaluationTable'
 import { InsightPanel } from './InsightPanel'
 import { CompareInsightPanel } from './CompareInsightPanel'
+import { CausalImpactPanel } from './CausalImpactPanel'
+import { CohortPanel } from './CohortPanel'
 import { CorrelateTab } from './CorrelateTab'
 import { SaveViewButton } from './SaveViewButton'
 import { ViewsDropdown } from './ViewsDropdown'
@@ -35,6 +37,9 @@ import { InsightsFeed } from './InsightsFeed'
 import { ExportPdfButton } from './ExportPdfButton'
 import { ForecastAccuracyPanel } from './ForecastAccuracyPanel'
 import { WatchlistPanel } from './WatchlistPanel'
+import { ProgressBar } from './ProgressBar'
+import { ErrorAlert } from './ErrorAlert'
+import { PluginsPage } from './PluginsPage'
 import type { SavedViewResponse } from '../api/types'
 
 // Generate a friendly label from series metadata or query
@@ -61,21 +66,23 @@ function getFriendlyLabel(s: TimeSeries): string {
 }
 
 export function Dashboard() {
-  const { sources, series, analysis, forecast, loading, error, loadData } =
+  const { sources, series, analysis, forecast, loading, error, loadData, requestId } =
     useApi()
+  const wsProgress = useWebSocket(requestId)
   const [selectedModel, setSelectedModel] = useState('')
   const [lastQuery, setLastQuery] = useState({ source: '', query: '', horizon: 14, resample: '' })
   const [showBreaks, setShowBreaks] = useState(true)
   const [showAnomalies, setShowAnomalies] = useState(true)
+  const [showRegimes, setShowRegimes] = useState(true)
 
-  const [activeTab, setActiveTab] = useState<'forecast' | 'compare' | 'correlate'>('forecast')
+  const [activeTab, setActiveTab] = useState<'forecast' | 'compare' | 'correlate' | 'plugins'>('forecast')
   const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
   const [compareAnalyses, setCompareAnalyses] = useState<TrendAnalysis[] | null>(null)
   const [compareResample, setCompareResample] = useState('')
   const [compareApply, setCompareApply] = useState('')
   const [compareItems, setCompareItems] = useState<CompareItem[]>([])
   const [compareLoading, setCompareLoading] = useState(false)
-  const [compareError, setCompareError] = useState<string | null>(null)
+  const [compareError, setCompareError] = useState<string | ApiError | null>(null)
   const [anomalyMethod, setAnomalyMethod] = useState('zscore')
   const [queryPrefill, setQueryPrefill] = useState<QueryPrefill | null>(null)
   const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
@@ -129,7 +136,7 @@ export function Dashboard() {
       setCompareSeries(result.series)
       setCompareAnalyses(result.analyses ?? null)
     } catch (err) {
-      setCompareError(err instanceof Error ? err.message : String(err))
+      setCompareError(err instanceof ApiError ? err : err instanceof Error ? err.message : String(err))
     } finally {
       setCompareLoading(false)
     }
@@ -176,6 +183,7 @@ export function Dashboard() {
           <Tab value="forecast" label="Forecast" />
           <Tab value="compare" label="Compare" />
           <Tab value="correlate" label="Correlate" />
+          <Tab value="plugins" label="Plugins" />
         </Tabs>
         <Box sx={{ pb: 1 }}>
           <ViewsDropdown onLoadView={handleLoadView} />
@@ -197,19 +205,10 @@ export function Dashboard() {
             prefill={queryPrefill}
           />
 
-          {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
-          )}
+          {error && <ErrorAlert error={error} />}
 
           {loading && (
-            <Box sx={{ textAlign: 'center', py: 6 }}>
-              <CircularProgress size={32} />
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                Fetching data and running analysis...
-              </Typography>
-            </Box>
+            <ProgressBar progress={wsProgress} />
           )}
 
           {hasData && (
@@ -248,6 +247,7 @@ export function Dashboard() {
                     analysis={analysis}
                     showBreaks={showBreaks}
                     showAnomalies={showAnomalies}
+                    showRegimes={showRegimes}
                     resample={lastQuery.resample}
                   />
                   <Box sx={{ mt: 1, display: 'flex', gap: 2, alignItems: 'center' }}>
@@ -270,6 +270,16 @@ export function Dashboard() {
                         />
                       }
                       label={<Typography variant="body2">Anomalies</Typography>}
+                    />
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={showRegimes}
+                          onChange={(e) => setShowRegimes(e.target.checked)}
+                        />
+                      }
+                      label={<Typography variant="body2">Regimes</Typography>}
                     />
                     <FormControl size="small" sx={{ minWidth: 110 }}>
                       <InputLabel>Anomaly method</InputLabel>
@@ -294,6 +304,14 @@ export function Dashboard() {
                       source={lastQuery.source}
                       query={lastQuery.query}
                       forecast={forecast}
+                    />
+                  )}
+                  {lastQuery.source && lastQuery.query && (
+                    <CausalImpactPanel
+                      source={lastQuery.source}
+                      query={lastQuery.query}
+                      resample={lastQuery.resample || undefined}
+                      apply={lastApply || undefined}
                     />
                   )}
                 </Grid>
@@ -354,11 +372,7 @@ export function Dashboard() {
             prefill={comparePrefill}
           />
 
-          {compareError && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {compareError}
-            </Alert>
-          )}
+          {compareError && <ErrorAlert error={compareError} />}
 
           {compareLoading && (
             <Box sx={{ textAlign: 'center', py: 6 }}>
@@ -417,12 +431,22 @@ export function Dashboard() {
               </Typography>
             </Box>
           )}
+
+          <Divider sx={{ my: 3 }}>
+            <Typography variant="caption" color="text.secondary">
+              Cohort Analysis
+            </Typography>
+          </Divider>
+
+          <CohortPanel sources={sources} />
         </>
       )}
 
       {activeTab === 'correlate' && (
         <CorrelateTab sources={sources} />
       )}
+
+      {activeTab === 'plugins' && <PluginsPage />}
     </Box>
   )
 }

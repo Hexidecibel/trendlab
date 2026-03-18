@@ -15,6 +15,15 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class ErrorResponse(BaseModel):
+    """Structured error response with user-friendly messages."""
+
+    detail: str
+    hint: str | None = None
+    error_code: str | None = None
+    request_id: str | None = None
+
+
 class DataPoint(BaseModel):
     date: datetime.date
     value: float
@@ -106,6 +115,15 @@ class StructuralBreak(BaseModel):
     confidence: float
 
 
+class Regime(BaseModel):
+    start_date: str
+    end_date: str
+    label: str  # "rising", "falling", "stable"
+    mean_value: float
+    mean_return: float
+    volatility: float
+
+
 class TrendAnalysis(BaseModel):
     source: str
     query: str
@@ -114,6 +132,7 @@ class TrendAnalysis(BaseModel):
     seasonality: SeasonalityResult
     anomalies: AnomalyReport
     structural_breaks: list[StructuralBreak]
+    regimes: list[Regime] = []
 
 
 # --- Phase 4: Forecasting models ---
@@ -148,6 +167,18 @@ class ForecastComparison(BaseModel):
     forecasts: list[ModelForecast]
     evaluations: list[ModelEvaluation]
     recommended_model: str
+
+
+# --- Event Context models ---
+
+
+class EventContext(BaseModel):
+    """Context about real-world events near anomaly dates."""
+
+    date: str
+    headline: str
+    source_url: str | None = None
+    relevance: str | None = None
 
 
 # --- Phase 5: AI Commentary models ---
@@ -254,6 +285,17 @@ class NaturalQueryResponse(BaseModel):
     resample: str | None = None
     apply: str | None = None
     interpretation: str
+    alert: bool = False
+
+
+class NaturalAlertResponse(BaseModel):
+    source: str
+    query: str
+    threshold_direction: str  # "above" or "below"
+    threshold_value: float
+    name: str
+    interpretation: str
+    alert: bool = True
 
 
 class NaturalQueryError(BaseModel):
@@ -272,6 +314,34 @@ class NaturalCompareResponse(BaseModel):
     items: list[NaturalCompareItem] = Field(..., min_length=2, max_length=3)
     resample: str | None = None
     interpretation: str
+
+
+# --- Cohort comparison models ---
+
+
+class CohortMember(BaseModel):
+    source: str
+    query: str
+    total_return: float
+    max_drawdown: float
+    volatility: float
+    rank: int
+    normalized_points: list[DataPoint]
+
+
+class CohortRequest(BaseModel):
+    source: str
+    queries: list[str] = Field(..., min_length=2, max_length=20)
+    start_date: str | None = None
+    end_date: str | None = None
+    normalize: bool = True
+
+
+class CohortResponse(BaseModel):
+    source: str
+    members: list[CohortMember]
+    period_start: str | None
+    period_end: str | None
 
 
 # --- Saved Views models ---
@@ -313,6 +383,7 @@ class ChatMessage(BaseModel):
 
 class DataContext(BaseModel):
     """Rich context about the data for follow-up questions."""
+
     # Basic info
     data_points_count: int
     date_range: str  # e.g., "2024-01-01 to 2024-12-31"
@@ -340,7 +411,9 @@ class DataContext(BaseModel):
 
     # Forecast (optional)
     forecast_horizon: int | None = None
-    forecast_values: list[dict] | None = None  # [{date, value, lower_ci, upper_ci}, ...]
+    forecast_values: list[dict] | None = (
+        None  # [{date, value, lower_ci, upper_ci}, ...]
+    )
 
 
 class InsightFollowupRequest(BaseModel):
@@ -356,6 +429,32 @@ class CompareInsightFollowupRequest(BaseModel):
     messages: list[ChatMessage]  # Conversation history
     context_summary: str  # The initial AI comparison summary
     data_contexts: list[DataContext] | None = None  # Rich context for each series
+
+
+# --- Causal Impact models ---
+
+
+class CausalImpactPoint(BaseModel):
+    date: datetime.date
+    actual: float
+    predicted: float
+    lower_ci: float
+    upper_ci: float
+    impact: float
+
+
+class CausalImpactResponse(BaseModel):
+    source: str
+    query: str
+    event_date: str
+    pre_period_length: int
+    post_period_length: int
+    cumulative_impact: float
+    relative_impact_pct: float
+    p_value: float
+    significant: bool
+    summary: str
+    pointwise: list[CausalImpactPoint]
 
 
 # --- Watchlist models ---
@@ -396,3 +495,32 @@ class WatchlistCheckResponse(BaseModel):
     items: list[WatchlistItemResponse]
     checked_at: datetime.datetime
     alerts: list[WatchlistItemResponse] = Field(default_factory=list)
+
+
+# --- Notification models ---
+
+
+class NotificationConfigRequest(BaseModel):
+    """Request to save/update notification config."""
+
+    webhook_url: str
+    channel: str = "generic"
+    enabled: bool = True
+
+
+class NotificationConfigResponse(BaseModel):
+    """Response for notification config."""
+
+    webhook_url: str
+    channel: str
+    enabled: bool
+    created_at: datetime.datetime
+
+
+class NotificationStatusResponse(BaseModel):
+    """Response for notification scheduler status."""
+
+    running: bool
+    last_check: str | None
+    next_check: str | None
+    interval: int

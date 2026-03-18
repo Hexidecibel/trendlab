@@ -9,9 +9,9 @@ import Link from '@mui/material/Link'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
-import { parseNaturalQuery } from '../api/client'
-import { isCompareResult } from '../api/types'
-import type { NaturalCompareItem } from '../api/types'
+import { addToWatchlist, parseNaturalQuery } from '../api/client'
+import { isAlertResult, isCompareResult } from '../api/types'
+import type { NaturalAlertResponse, NaturalCompareItem } from '../api/types'
 
 const EXAMPLE_QUERIES = [
   // Sports - MLS teams with season resampling
@@ -64,6 +64,9 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showHelp, setShowHelp] = useState(false)
+  const [alertResult, setAlertResult] = useState<NaturalAlertResponse | null>(null)
+  const [alertAdding, setAlertAdding] = useState(false)
+  const [alertSuccess, setAlertSuccess] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -73,11 +76,15 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
     setError('')
     setSuggestions([])
     setInterpretation('')
+    setAlertResult(null)
+    setAlertSuccess('')
 
     try {
       const result = await parseNaturalQuery(text.trim())
       setInterpretation(result.interpretation)
-      if (isCompareResult(result)) {
+      if (isAlertResult(result)) {
+        setAlertResult(result)
+      } else if (isCompareResult(result)) {
         onCompareResult?.(
           result.items,
           result.interpretation,
@@ -117,6 +124,30 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
   const handleExampleClick = (query: string) => {
     setText(query)
     setShowHelp(false)
+  }
+
+  const handleAlertConfirm = async () => {
+    if (!alertResult) return
+    setAlertAdding(true)
+    try {
+      await addToWatchlist({
+        name: alertResult.name,
+        source: alertResult.source,
+        query: alertResult.query,
+        threshold_direction: alertResult.threshold_direction,
+        threshold_value: alertResult.threshold_value,
+      })
+      setAlertSuccess(`Added "${alertResult.name}" to watchlist`)
+      setAlertResult(null)
+    } catch {
+      setError('Failed to add alert to watchlist')
+    } finally {
+      setAlertAdding(false)
+    }
+  }
+
+  const handleAlertCancel = () => {
+    setAlertResult(null)
   }
 
   return (
@@ -208,6 +239,42 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
       {interpretation && (
         <Alert severity="success" sx={{ mt: 1 }}>
           {interpretation}
+        </Alert>
+      )}
+
+      {alertResult && (
+        <Alert
+          severity="info"
+          sx={{ mt: 1 }}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={handleAlertConfirm}
+                disabled={alertAdding}
+              >
+                {alertAdding ? <CircularProgress size={16} color="inherit" /> : 'Add to Watchlist'}
+              </Button>
+              <Button size="small" onClick={handleAlertCancel}>
+                Cancel
+              </Button>
+            </Box>
+          }
+        >
+          <Typography variant="subtitle2" gutterBottom>
+            Create alert: {alertResult.name}
+          </Typography>
+          <Typography variant="body2">
+            Source: {alertResult.source} &middot; Query: {alertResult.query} &middot;{' '}
+            Trigger: {alertResult.threshold_direction} {alertResult.threshold_value.toLocaleString()}
+          </Typography>
+        </Alert>
+      )}
+
+      {alertSuccess && (
+        <Alert severity="success" sx={{ mt: 1 }} onClose={() => setAlertSuccess('')}>
+          {alertSuccess}
         </Alert>
       )}
 

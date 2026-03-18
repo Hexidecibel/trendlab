@@ -112,58 +112,6 @@ MOCK_XPASS = [
     },
 ]
 
-# --- Player-level mock data ---
-
-MOCK_PLAYERS = [
-    {"player_id": "p1abc", "player_name": "Jordan Morris"},
-    {"player_id": "p2def", "player_name": "Raul Ruidiaz"},
-]
-
-MOCK_PLAYER_XGOALS = [
-    {
-        "player_id": "p1abc",
-        "game_id": "game1",
-        "team_id": "jYQJ19EqGR",
-        "minutes_played": 90,
-        "shots": 3,
-        "shots_on_target": 2,
-        "goals": 1,
-        "xgoals": 0.8,
-        "goals_minus_xgoals": 0.2,
-        "key_passes": 2,
-        "primary_assists": 0,
-        "xassists": 0.3,
-        "xgoals_plus_xassists": 1.1,
-    },
-    {
-        "player_id": "p1abc",
-        "game_id": "game2",
-        "team_id": "jYQJ19EqGR",
-        "minutes_played": 75,
-        "shots": 1,
-        "shots_on_target": 0,
-        "goals": 0,
-        "xgoals": 0.3,
-        "goals_minus_xgoals": -0.3,
-        "key_passes": 1,
-        "primary_assists": 1,
-        "xassists": 0.5,
-        "xgoals_plus_xassists": 0.8,
-    },
-]
-
-MOCK_PLAYER_XPASS = [
-    {
-        "player_id": "p1abc",
-        "game_id": "game1",
-        "team_id": "jYQJ19EqGR",
-        "attempted_passes": 45,
-        "pass_completion_percentage": 0.82,
-        "xpass_completion_percentage": 0.80,
-        "passes_completed_over_expected": 1.0,
-    },
-]
-
 
 def _mock_response(json_data, status_code=200):
     mock = MagicMock()
@@ -193,9 +141,8 @@ class TestASAAdapter:
         fields = adapter.form_fields()
         names = [f.name for f in fields]
         assert "league" in names
-        assert "entity_type" in names
+        assert "team" in names
         assert "metric" in names
-        assert "entity" in names
 
     @pytest.mark.asyncio
     async def test_lookup_teams(self, adapter):
@@ -217,13 +164,14 @@ class TestASAAdapter:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            # First call: games, second call: xgoals
+            # Calls: games, xgoals metric data, team name lookup
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:xgoals_for")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:xgoals_for")
             assert ts.source == "asa"
             assert len(ts.points) == 3
             assert ts.points[0].date == datetime.date(2024, 3, 1)
@@ -239,9 +187,10 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for")
             assert len(ts.points) == 3
             assert ts.points[0].value == 2  # goals_for from game1
 
@@ -255,11 +204,10 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XPASS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch(
-                "mls:teams:jYQJ19EqGR:pass_completion_percentage_for"
-            )
+            ts = await adapter.fetch("mls:jYQJ19EqGR:pass_completion_percentage_for")
             assert len(ts.points) == 1
             assert ts.points[0].value == 0.85
 
@@ -273,10 +221,11 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
             ts = await adapter.fetch(
-                "mls:teams:jYQJ19EqGR:xgoals_for",
+                "mls:jYQJ19EqGR:xgoals_for",
                 start=datetime.date(2024, 3, 10),
             )
             assert len(ts.points) == 2  # game2 and game3
@@ -288,18 +237,8 @@ class TestASAAdapter:
 
     @pytest.mark.asyncio
     async def test_fetch_invalid_metric(self, adapter):
-        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            mock_client.get.side_effect = [
-                _mock_response(MOCK_GAMES),
-                _mock_response(MOCK_XGOALS),
-            ]
-
-            with pytest.raises(ValueError, match="Unknown metric"):
-                await adapter.fetch("mls:teams:jYQJ19EqGR:nonexistent_metric")
+        with pytest.raises(ValueError, match="Unknown metric"):
+            await adapter.fetch("mls:jYQJ19EqGR:nonexistent_metric")
 
     @pytest.mark.asyncio
     async def test_metadata_includes_team_and_metric(self, adapter):
@@ -311,12 +250,13 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:xgoals_for")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:xgoals_for")
             assert ts.metadata["metric"] == "xgoals_for"
             assert ts.metadata["league"] == "mls"
-            assert ts.metadata["entity_type"] == "teams"
+            assert ts.metadata["team_id"] == "jYQJ19EqGR"
 
     @pytest.mark.asyncio
     async def test_points_sorted_by_date(self, adapter):
@@ -328,9 +268,10 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for")
             dates = [p.date for p in ts.points]
             assert dates == sorted(dates)
 
@@ -345,10 +286,11 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
             # game1 and game3 are home for jYQJ19EqGR, game2 is away
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:home:all")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for:home:all")
             assert len(ts.points) == 2
             assert ts.points[0].value == 2  # game1
             assert ts.points[1].value == 1  # game3
@@ -364,10 +306,11 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
             # game2 is away for jYQJ19EqGR
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:away:all")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for:away:all")
             assert len(ts.points) == 1
             assert ts.points[0].value == 3  # game2
 
@@ -382,10 +325,11 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
             # Only game3 has knockout_game=True
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:all:playoffs")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for:all:playoffs")
             assert len(ts.points) == 1
             assert ts.points[0].date == datetime.date(2024, 4, 1)
 
@@ -400,10 +344,11 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
             # game1 and game2 have knockout_game=False
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:all:regular")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for:all:regular")
             assert len(ts.points) == 2
 
     @pytest.mark.asyncio
@@ -417,10 +362,11 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
             # Only game3: home + knockout
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:home:playoffs")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for:home:playoffs")
             assert len(ts.points) == 1
             assert ts.points[0].value == 1  # game3
 
@@ -435,15 +381,16 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for:home:regular")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for:home:regular")
             assert ts.metadata["home_away"] == "home"
             assert ts.metadata["stage"] == "regular"
 
     @pytest.mark.asyncio
     async def test_fetch_defaults_filters_when_omitted(self, adapter):
-        """4-part query should default home_away=all and stage=all."""
+        """3-part query should default home_away=all and stage=all."""
         with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -452,9 +399,10 @@ class TestASAAdapter:
             mock_client.get.side_effect = [
                 _mock_response(MOCK_GAMES),
                 _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:teams:jYQJ19EqGR:goals_for")
+            ts = await adapter.fetch("mls:jYQJ19EqGR:goals_for")
             assert ts.metadata["home_away"] == "all"
             assert ts.metadata["stage"] == "all"
             assert len(ts.points) == 3  # all games included
@@ -470,31 +418,6 @@ class TestASAAdapter:
         stage = next(f for f in fields if f.name == "stage")
         assert len(stage.options) == 3
 
-
-class TestASAPlayerQueries:
-    """Tests for player-level ASA queries."""
-
-    def test_entity_type_includes_players(self, adapter):
-        """entity_type form field should include 'players' option."""
-        fields = adapter.form_fields()
-        entity_type = next(f for f in fields if f.name == "entity_type")
-        values = [o.value for o in entity_type.options]
-        assert "players" in values
-
-    @pytest.mark.asyncio
-    async def test_lookup_players(self, adapter):
-        """lookup('players') should return player list."""
-        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get.return_value = _mock_response(MOCK_PLAYERS)
-
-            items = await adapter.lookup("players", league="mls")
-            assert len(items) == 2
-            assert items[0].label == "Jordan Morris"
-            assert items[0].value == "p1abc"
-
     @pytest.mark.asyncio
     async def test_lookup_unknown_type(self, adapter):
         """Unknown lookup type should return empty list."""
@@ -502,88 +425,37 @@ class TestASAPlayerQueries:
         assert items == []
 
     @pytest.mark.asyncio
-    async def test_fetch_player_xgoals(self, adapter):
-        """Player xgoals query should return TimeSeries."""
+    async def test_lookup_team_alias(self, adapter):
+        """lookup('team') should also work (alias for 'teams')."""
         with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get.return_value = _mock_response(MOCK_TEAMS)
 
-            # For players: metric data first, then games
-            mock_client.get.side_effect = [
-                _mock_response(MOCK_PLAYER_XGOALS),
-                _mock_response(MOCK_GAMES),
-            ]
-
-            ts = await adapter.fetch("mls:players:p1abc:goals")
-            assert ts.source == "asa"
-            assert len(ts.points) == 2
-            assert ts.points[0].date == datetime.date(2024, 3, 1)
-            assert ts.points[0].value == 1  # goals from game1
-            assert ts.points[1].value == 0  # goals from game2
+            items = await adapter.lookup("team", league="mls")
+            assert len(items) == 2
 
     @pytest.mark.asyncio
-    async def test_fetch_player_xpass(self, adapter):
-        """Player xpass query should return TimeSeries."""
+    async def test_metadata_includes_team_name(self, adapter):
+        """Metadata should include resolved team name."""
         with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             mock_client.get.side_effect = [
-                _mock_response(MOCK_PLAYER_XPASS),
                 _mock_response(MOCK_GAMES),
+                _mock_response(MOCK_XGOALS),
+                _mock_response(MOCK_TEAMS),
             ]
 
-            ts = await adapter.fetch("mls:players:p1abc:pass_completion_percentage")
-            assert len(ts.points) == 1
-            assert ts.points[0].value == 0.82
+            ts = await adapter.fetch("mls:jYQJ19EqGR:xgoals_for")
+            assert ts.metadata["team"] == "Seattle Sounders FC"
 
     @pytest.mark.asyncio
-    async def test_player_metadata(self, adapter):
-        """Player query metadata should have entity_type=players."""
-        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            mock_client.get.side_effect = [
-                _mock_response(MOCK_PLAYER_XGOALS),
-                _mock_response(MOCK_GAMES),
-            ]
-
-            ts = await adapter.fetch("mls:players:p1abc:goals")
-            assert ts.metadata["entity_type"] == "players"
-            assert ts.metadata["entity_id"] == "p1abc"
-            assert ts.metadata["metric"] == "goals"
-
-    @pytest.mark.asyncio
-    async def test_player_home_filter(self, adapter):
-        """Venue filter should work for player queries using team_id."""
-        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            mock_client.get.side_effect = [
-                _mock_response(MOCK_PLAYER_XGOALS),
-                _mock_response(MOCK_GAMES),
-            ]
-
-            # game1 is home for jYQJ19EqGR, game2 is away
-            ts = await adapter.fetch("mls:players:p1abc:goals:home:all")
-            assert len(ts.points) == 1
-            assert ts.points[0].value == 1  # game1 only
-
-    @pytest.mark.asyncio
-    async def test_player_empty_metric_data(self, adapter):
-        """Empty metric data should return empty TimeSeries."""
-        with patch("app.data.adapters.asa.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            mock_client.get.return_value = _mock_response([])
-
-            ts = await adapter.fetch("mls:players:p1abc:goals")
-            assert len(ts.points) == 0
+    async def test_custom_resample_periods(self, adapter):
+        """Should expose mls_season as a custom resample period."""
+        periods = adapter.custom_resample_periods()
+        assert len(periods) == 1
+        assert periods[0].value == "mls_season"

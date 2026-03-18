@@ -84,6 +84,15 @@ export interface StructuralBreak {
   confidence: number
 }
 
+export interface Regime {
+  start_date: string
+  end_date: string
+  label: 'rising' | 'falling' | 'stable'
+  mean_value: number
+  mean_return: number
+  volatility: number
+}
+
 export interface TrendAnalysis {
   source: string
   query: string
@@ -92,6 +101,7 @@ export interface TrendAnalysis {
   seasonality: SeasonalityResult
   anomalies: AnomalyReport
   structural_breaks: StructuralBreak[]
+  regimes: Regime[]
 }
 
 export interface ForecastPoint {
@@ -134,6 +144,17 @@ export interface NaturalQueryResponse {
   resample: string | null
   apply: string | null
   interpretation: string
+  alert?: boolean
+}
+
+export interface NaturalAlertResponse {
+  source: string
+  query: string
+  threshold_direction: 'above' | 'below'
+  threshold_value: number
+  name: string
+  interpretation: string
+  alert: true
 }
 
 export interface NaturalCompareItem {
@@ -149,10 +170,14 @@ export interface NaturalCompareResponse {
   interpretation: string
 }
 
-export type NaturalQueryResult = NaturalQueryResponse | NaturalCompareResponse
+export type NaturalQueryResult = NaturalQueryResponse | NaturalCompareResponse | NaturalAlertResponse
 
 export function isCompareResult(r: NaturalQueryResult): r is NaturalCompareResponse {
   return 'items' in r
+}
+
+export function isAlertResult(r: NaturalQueryResult): r is NaturalAlertResponse {
+  return 'alert' in r && r.alert === true
 }
 
 export interface CompareItem {
@@ -244,6 +269,56 @@ export interface CorrelateResponse {
   scatter: ScatterPoint[]
 }
 
+// Cohort comparison types
+export interface CohortMember {
+  source: string
+  query: string
+  total_return: number
+  max_drawdown: number
+  volatility: number
+  rank: number
+  normalized_points: DataPoint[]
+}
+
+export interface CohortRequest {
+  source: string
+  queries: string[]
+  start_date?: string
+  end_date?: string
+  normalize?: boolean
+}
+
+export interface CohortResponse {
+  source: string
+  members: CohortMember[]
+  period_start: string | null
+  period_end: string | null
+}
+
+// Causal Impact types
+export interface CausalImpactPoint {
+  date: string
+  actual: number
+  predicted: number
+  lower_ci: number
+  upper_ci: number
+  impact: number
+}
+
+export interface CausalImpactResponse {
+  source: string
+  query: string
+  event_date: string
+  pre_period_length: number
+  post_period_length: number
+  cumulative_impact: number
+  relative_impact_pct: number
+  p_value: number
+  significant: boolean
+  summary: string
+  pointwise: CausalImpactPoint[]
+}
+
 // Watchlist types
 export interface WatchlistAddRequest {
   name: string
@@ -292,4 +367,53 @@ export interface DataContext {
   seasonality_period?: number
   forecast_horizon?: number
   forecast_values?: Array<{ date: string; value: number; lower_ci: number; upper_ci: number }>
+}
+
+// Event context for anomaly explanation
+export interface EventContext {
+  date: string
+  headline: string
+  source_url: string | null
+  relevance: string | null
+}
+
+// Notification types
+export interface NotificationConfigRequest {
+  webhook_url: string
+  channel: string
+  enabled: boolean
+}
+
+export interface NotificationConfig {
+  webhook_url: string
+  channel: string
+  enabled: boolean
+  created_at: string
+}
+
+export interface NotificationStatus {
+  running: boolean
+  last_check: string | null
+  next_check: string | null
+  interval: number
+}
+
+// Plugin types
+export interface PluginInfo {
+  name: string
+  description: string
+  author: string
+  version: string
+  status: 'active' | 'missing_deps' | 'error' | 'no_manifest'
+  error_message: string | null
+  required_env_vars: string[]
+  has_readme: boolean
+}
+
+// Structured error response from the API
+export interface ApiErrorResponse {
+  detail: string
+  hint: string | null
+  error_code: string | null
+  request_id: string | null
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
+  ApiError,
   fetchSources,
   fetchSeries,
   fetchAnalysis,
@@ -12,18 +13,25 @@ import type {
   ForecastComparison,
 } from '../api/types'
 
+let idCounter = 0
+function generateRequestId(): string {
+  idCounter += 1
+  return `${Date.now()}-${idCounter}`
+}
+
 export function useApi() {
   const [sources, setSources] = useState<DataSourceInfo[]>([])
   const [series, setSeries] = useState<TimeSeries | null>(null)
   const [analysis, setAnalysis] = useState<TrendAnalysis | null>(null)
   const [forecast, setForecast] = useState<ForecastComparison | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | ApiError | null>(null)
+  const [requestId, setRequestId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchSources()
       .then(setSources)
-      .catch((err) => setError(err.message))
+      .catch((err) => setError(err instanceof ApiError ? err : err.message))
   }, [])
 
   const loadData = useCallback(
@@ -38,6 +46,8 @@ export function useApi() {
       anomalyMethod?: string,
       refresh?: boolean,
     ) => {
+      const rid = generateRequestId()
+      setRequestId(rid)
       setLoading(true)
       setError(null)
       setSeries(null)
@@ -54,13 +64,14 @@ export function useApi() {
         setAnalysis(a)
         setForecast(f)
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(err instanceof ApiError ? err : err instanceof Error ? err.message : String(err))
       } finally {
         setLoading(false)
+        setRequestId(null)
       }
     },
     [],
   )
 
-  return { sources, series, analysis, forecast, loading, error, loadData }
+  return { sources, series, analysis, forecast, loading, error, loadData, requestId }
 }

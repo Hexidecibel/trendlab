@@ -5,9 +5,16 @@ from app.models.schemas import DataSourceInfo
 class AdapterRegistry:
     def __init__(self):
         self._adapters: dict[str, DataAdapter] = {}
+        self.plugin_adapters: set[str] = set()
 
-    def register(self, adapter: DataAdapter) -> None:
+    def register(self, adapter: DataAdapter, *, is_plugin: bool = False) -> None:
         self._adapters[adapter.name] = adapter
+        if is_plugin:
+            self.plugin_adapters.add(adapter.name)
+
+    def unregister(self, name: str) -> None:
+        self._adapters.pop(name, None)
+        self.plugin_adapters.discard(name)
 
     def get(self, name: str) -> DataAdapter:
         return self._adapters[name]

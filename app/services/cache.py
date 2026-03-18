@@ -64,7 +64,9 @@ class CachedFetcher:
 
         try:
             # Cache miss, stale, or forced refresh
-            log.with_fields(cache_hit=False, refresh=refresh).info("Cache miss, fetching")
+            log.with_fields(
+                cache_hit=False, refresh=refresh
+            ).info("Cache miss, fetching")
             start_time = time.perf_counter()
             ts = await adapter.fetch(query, start=start, end=end)
             elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -79,9 +81,10 @@ class CachedFetcher:
                 ts = await adapter.fetch(query, start=start, end=end)
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-            log.with_fields(fetch_ms=round(elapsed_ms, 2), data_points=len(ts.points)).info(
-                "Fetched from source"
-            )
+            log.with_fields(
+                fetch_ms=round(elapsed_ms, 2),
+                data_points=len(ts.points),
+            ).info("Fetched from source")
 
             # Only cache non-empty series to avoid caching transient API failures
             if _engine_mod.async_session is not None and ts.points:

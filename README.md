@@ -104,6 +104,30 @@ cd frontend && npm install && npm run dev
 | `github_stars` | Repository star history | Yes (token) |
 | `asa` | American Soccer Analysis (MLS, NWSL, USL) | No |
 | `football` | European football match data | Yes (token) |
+| `weather` | Historical weather data (Open-Meteo) | No |
+| `wikipedia` | Article page views | No |
+| `stocks` | Stock/ETF prices (Yahoo Finance) | No |
+| `npm` | npm package downloads | No |
+| `csv` | Custom CSV uploads | No |
+
+## Resampling
+
+All endpoints support a `resample` parameter for time aggregation:
+
+**Standard periods** (all sources):
+- `week` — Weekly aggregation
+- `month` — Monthly aggregation
+- `quarter` — Quarterly aggregation
+- `year` — Yearly aggregation
+
+**Custom periods** (source-specific):
+| Source | Period | Description |
+|--------|--------|-------------|
+| `asa` | `mls_season` | MLS/NWSL/USL season (calendar year) |
+| `weather` | `meteorological_season` | Winter/Spring/Summer/Fall |
+| `football` | `football_season` | European season (Aug-May) |
+
+Custom periods appear in the Resample dropdown when their source is selected.
 
 ## API Endpoints
 
@@ -147,6 +171,122 @@ uv run ruff format .
 cd frontend && npm run build
 ```
 
+## Custom Plugins
+
+TrendLab supports community-contributed data adapters via a simple plugin system. Drop a `.py` file into the `plugins/` directory and it will be auto-loaded on startup.
+
+### Creating a Plugin
+
+Create a file in `plugins/` (e.g., `plugins/my_adapter.py`):
+
+```python
+import datetime
+from app.data.base import DataAdapter
+from app.models.schemas import DataPoint, TimeSeries
+
+class MyDataAdapter(DataAdapter):
+    name = "my_source"  # Unique identifier (used in API calls)
+    description = "My custom data source"
+    aggregation_method = "mean"  # or "sum" for cumulative data
+
+    async def fetch(
+        self,
+        query: str,
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+    ) -> TimeSeries:
+        # Fetch your data here (use httpx for async HTTP calls)
+        # Return a TimeSeries with DataPoints
+
+        points = [
+            DataPoint(date=datetime.date(2024, 1, 1), value=100.0),
+            DataPoint(date=datetime.date(2024, 1, 2), value=105.0),
+        ]
+
+        return TimeSeries(
+            source=self.name,
+            query=query,
+            points=points,
+        )
+```
+
+### Plugin Requirements
+
+- File must be in `plugins/` directory
+- File must not start with `_` (underscore files are ignored)
+- Must define exactly one class extending `DataAdapter`
+- Class must have `name` and `description` attributes
+- Must implement the `async def fetch()` method
+
+### Optional: Custom Form Fields
+
+For adapters with structured queries (dropdowns, autocomplete):
+
+```python
+from app.models.schemas import FormField, FormFieldOption
+
+class MyDataAdapter(DataAdapter):
+    # ... name, description, fetch() ...
+
+    def form_fields(self) -> list[FormField]:
+        return [
+            FormField(
+                name="category",
+                label="Category",
+                field_type="select",
+                options=[
+                    FormFieldOption(value="a", label="Option A"),
+                    FormFieldOption(value="b", label="Option B"),
+                ],
+            ),
+            FormField(
+                name="item",
+                label="Item",
+                field_type="text",
+                placeholder="Enter item name...",
+            ),
+        ]
+```
+
+### Example: Simple API Adapter
+
+```python
+import datetime
+import httpx
+from app.data.base import DataAdapter
+from app.models.schemas import DataPoint, TimeSeries
+
+class WeatherHistoryAdapter(DataAdapter):
+    name = "weather_history"
+    description = "Historical weather data"
+    aggregation_method = "mean"
+
+    async def fetch(
+        self,
+        query: str,  # e.g., "london:temperature"
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+    ) -> TimeSeries:
+        location, metric = query.split(":")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.example.com/weather/{location}",
+                params={"metric": metric, "start": str(start), "end": str(end)},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        points = [
+            DataPoint(date=datetime.date.fromisoformat(d["date"]), value=d["value"])
+            for d in data["points"]
+        ]
+
+        return TimeSeries(source=self.name, query=query, points=points)
+```
+
+Restart the server after adding plugins. Check `/api/sources` to verify your adapter is loaded.
+
 ## Project Structure
 
 ```
@@ -157,7 +297,7 @@ trendlab/
 │   ├── routers/api.py       # API endpoints
 │   ├── models/schemas.py    # Pydantic models
 │   ├── data/
-│   │   ├── adapters/        # Data source adapters
+│   │   ├── adapters/        # Built-in data source adapters
 │   │   └── registry.py      # Adapter registry
 │   ├── analysis/            # Trend detection modules
 │   ├── forecasting/         # Forecasting models
@@ -165,6 +305,7 @@ trendlab/
 │   ├── services/            # Cache, transforms, aggregation
 │   ├── db/                  # SQLite persistence
 │   └── middleware/          # Logging, rate limiting
+├── plugins/                 # Community adapter plugins (auto-loaded)
 ├── frontend/                # React + Vite + MUI
 ├── tests/                   # 378+ tests
 ├── Dockerfile

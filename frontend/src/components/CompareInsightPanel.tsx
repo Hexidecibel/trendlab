@@ -9,6 +9,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import SendIcon from '@mui/icons-material/Send'
 import ReactMarkdown from 'react-markdown'
+import { API_BASE } from '../api/client'
 import type { CompareItem, TimeSeries, TrendAnalysis, DataContext } from '../api/types'
 
 interface ChatMessage {
@@ -108,7 +109,7 @@ export function CompareInsightPanel({ items, resample, apply, seriesList, analys
 
     const fetchStream = async () => {
       try {
-        const response = await fetch('/api/compare-insight', {
+        const response = await fetch(`${API_BASE}/compare-insight`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items, resample, apply }),
@@ -207,7 +208,7 @@ export function CompareInsightPanel({ items, resample, apply, seriesList, analys
     ]
 
     try {
-      const response = await fetch('/api/compare-insight-followup', {
+      const response = await fetch(`${API_BASE}/compare-insight-followup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

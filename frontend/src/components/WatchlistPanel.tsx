@@ -10,7 +10,9 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import Divider from '@mui/material/Divider'
 import FormControl from '@mui/material/FormControl'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import InputLabel from '@mui/material/InputLabel'
 import List from '@mui/material/List'
@@ -18,6 +20,7 @@ import ListItem from '@mui/material/ListItem'
 import ListItemText from '@mui/material/ListItemText'
 import MenuItem from '@mui/material/MenuItem'
 import Select from '@mui/material/Select'
+import Switch from '@mui/material/Switch'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import AddIcon from '@mui/icons-material/Add'
@@ -27,12 +30,23 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp'
 import TrendingDownIcon from '@mui/icons-material/TrendingDown'
 import TrendingFlatIcon from '@mui/icons-material/TrendingFlat'
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive'
-import type { DataSourceInfo, WatchlistItem, WatchlistAddRequest } from '../api/types'
+import SendIcon from '@mui/icons-material/Send'
+import type {
+  DataSourceInfo,
+  NotificationConfig,
+  NotificationStatus,
+  WatchlistItem,
+  WatchlistAddRequest,
+} from '../api/types'
 import {
   fetchWatchlist,
   addToWatchlist,
   checkWatchlist,
   deleteWatchlistItem,
+  getNotificationConfig,
+  saveNotificationConfig,
+  getNotificationStatus,
+  testNotification,
 } from '../api/client'
 
 interface Props {
@@ -56,6 +70,15 @@ export function WatchlistPanel({ sources, onLoadQuery }: Props) {
   const [newThresholdDir, setNewThresholdDir] = useState<'above' | 'below' | ''>('')
   const [newThresholdVal, setNewThresholdVal] = useState('')
 
+  // Notification settings state
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [channel, setChannel] = useState('generic')
+  const [notifEnabled, setNotifEnabled] = useState(true)
+  const [notifStatus, setNotifStatus] = useState<NotificationStatus | null>(null)
+  const [notifSaving, setNotifSaving] = useState(false)
+  const [notifTesting, setNotifTesting] = useState(false)
+  const [notifMsg, setNotifMsg] = useState<string | null>(null)
+
   const loadWatchlist = async () => {
     setLoading(true)
     setError(null)
@@ -66,6 +89,25 @@ export function WatchlistPanel({ sources, onLoadQuery }: Props) {
       setError(err instanceof Error ? err.message : 'Failed to load watchlist')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadNotificationConfig = async () => {
+    try {
+      const cfg = await getNotificationConfig()
+      if (cfg) {
+        setWebhookUrl(cfg.webhook_url)
+        setChannel(cfg.channel)
+        setNotifEnabled(cfg.enabled)
+      }
+    } catch {
+      // Config not set yet — that's fine
+    }
+    try {
+      const status = await getNotificationStatus()
+      setNotifStatus(status)
+    } catch {
+      // Ignore
     }
   }
 
@@ -117,6 +159,39 @@ export function WatchlistPanel({ sources, onLoadQuery }: Props) {
     }
   }
 
+  const handleSaveNotification = async () => {
+    if (!webhookUrl) return
+    setNotifSaving(true)
+    setNotifMsg(null)
+    try {
+      await saveNotificationConfig({
+        webhook_url: webhookUrl,
+        channel,
+        enabled: notifEnabled,
+      })
+      setNotifMsg('Notification settings saved')
+      const status = await getNotificationStatus()
+      setNotifStatus(status)
+    } catch (err) {
+      setNotifMsg(err instanceof Error ? err.message : 'Failed to save')
+    } finally {
+      setNotifSaving(false)
+    }
+  }
+
+  const handleTestNotification = async () => {
+    setNotifTesting(true)
+    setNotifMsg(null)
+    try {
+      const result = await testNotification()
+      setNotifMsg(result.message || 'Test sent successfully')
+    } catch (err) {
+      setNotifMsg(err instanceof Error ? err.message : 'Test failed')
+    } finally {
+      setNotifTesting(false)
+    }
+  }
+
   const resetForm = () => {
     setNewName('')
     setNewSource('')
@@ -147,6 +222,7 @@ export function WatchlistPanel({ sources, onLoadQuery }: Props) {
 
   useEffect(() => {
     loadWatchlist()
+    loadNotificationConfig()
   }, [])
 
   return (
@@ -272,6 +348,99 @@ export function WatchlistPanel({ sources, onLoadQuery }: Props) {
             ))}
           </List>
         )}
+
+        {/* Notification Settings */}
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Webhook Notifications
+        </Typography>
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <TextField
+            label="Webhook URL"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            placeholder="https://hooks.slack.com/services/..."
+            size="small"
+            fullWidth
+          />
+
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Channel</InputLabel>
+              <Select
+                value={channel}
+                label="Channel"
+                onChange={(e) => setChannel(e.target.value)}
+              >
+                <MenuItem value="generic">Generic</MenuItem>
+                <MenuItem value="slack">Slack</MenuItem>
+                <MenuItem value="discord">Discord</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={notifEnabled}
+                  onChange={(e) => setNotifEnabled(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="Enabled"
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleSaveNotification}
+              disabled={notifSaving || !webhookUrl}
+            >
+              {notifSaving ? 'Saving...' : 'Save'}
+            </Button>
+            <Button
+              size="small"
+              startIcon={<SendIcon />}
+              onClick={handleTestNotification}
+              disabled={notifTesting || !webhookUrl}
+            >
+              {notifTesting ? 'Sending...' : 'Test'}
+            </Button>
+          </Box>
+
+          {notifMsg && (
+            <Alert
+              severity="info"
+              sx={{ py: 0 }}
+              onClose={() => setNotifMsg(null)}
+            >
+              {notifMsg}
+            </Alert>
+          )}
+
+          {notifStatus && (
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Chip
+                label={notifStatus.running ? 'Scheduler running' : 'Scheduler stopped'}
+                size="small"
+                color={notifStatus.running ? 'success' : 'default'}
+                sx={{ height: 20, fontSize: '0.65rem' }}
+              />
+              {notifStatus.last_check && (
+                <Typography variant="caption" color="text.secondary">
+                  Last: {new Date(notifStatus.last_check).toLocaleTimeString()}
+                </Typography>
+              )}
+              {notifStatus.next_check && (
+                <Typography variant="caption" color="text.secondary">
+                  Next: {new Date(notifStatus.next_check).toLocaleTimeString()}
+                </Typography>
+              )}
+            </Box>
+          )}
+        </Box>
 
         {/* Add Dialog */}
         <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>

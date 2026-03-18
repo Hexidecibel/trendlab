@@ -1,0 +1,9 @@
+Resolved 79 packages in 989ms
+Downloading lxml (5.0MiB)
+ Downloaded lxml
+Prepared 4 packages in 225ms
+Installed 4 packages in 8ms
+ + lxml==6.0.2
+ + pytrends==4.9.2
+ + requests==2.32.5
+ + urllib3==2.6.3

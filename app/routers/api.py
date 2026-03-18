@@ -1,7 +1,7 @@
 import datetime
 import json
 
-from fastapi import APIRouter, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ from app.ai.summarizer import (
     summarize_compare_stream,
     summarize_stream,
 )
+from app.analysis.causal_impact import analyze_causal_impact
 from app.analysis.correlation import correlate as run_correlate
 from app.analysis.engine import analyze
 from app.config import settings
@@ -25,18 +26,26 @@ from app.db import repository as repo
 from app.forecasting.engine import forecast
 from app.logging_config import get_logger
 from app.middleware.auth import generate_session_token
+from app.models.plugin_schemas import PluginInfo
 from app.models.schemas import (
+    CausalImpactResponse,
+    CohortRequest,
+    CohortResponse,
     CompareInsightFollowupRequest,
     CompareRequest,
     CompareResponse,
     CorrelateRequest,
     CorrelateResponse,
     DataSourceInfo,
+    EventContext,
     ForecastComparison,
     InsightFollowupRequest,
     LookupItem,
     NaturalQueryError,
     NaturalQueryRequest,
+    NotificationConfigRequest,
+    NotificationConfigResponse,
+    NotificationStatusResponse,
     SavedViewResponse,
     SaveViewRequest,
     TimeSeries,
@@ -45,15 +54,34 @@ from app.models.schemas import (
     WatchlistCheckResponse,
     WatchlistItemResponse,
 )
+from app.plugins import reload_plugins, scan_plugins
 from app.services.aggregation import resample_series
 from app.services.cache import CachedFetcher
 from app.services.pdf_export import generate_pdf_report
+from app.services.progress import current_request_id, emit_progress
 from app.services.transforms import apply_transforms
+from app.services.watchlist_checker import (
+    check_watchlist as run_watchlist_check,
+)
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 _cache = CachedFetcher(ttl_seconds=settings.cache_ttl)
+
+
+def friendly_http_error(
+    status_code: int,
+    detail: str,
+    hint: str | None = None,
+    error_code: str | None = None,
+) -> HTTPException:
+    """Raise an HTTPException with a structured detail dict
+    for friendly error display."""
+    return HTTPException(
+        status_code=status_code,
+        detail={"detail": detail, "hint": hint, "error_code": error_code},
+    )
 
 
 class UnlockRequest(BaseModel):
@@ -77,7 +105,12 @@ async def unlock(request: UnlockRequest):
         return {"status": "ok", "message": "No authentication required"}
 
     if request.phrase != settings.secret_phrase:
-        raise HTTPException(status_code=401, detail="Invalid phrase")
+        raise friendly_http_error(
+            401,
+            "Invalid phrase",
+            hint="Enter the correct access phrase to unlock the app.",
+            error_code="INVALID_PHRASE",
+        )
 
     token = generate_session_token(settings.secret_phrase)
     response = JSONResponse({"status": "ok"})
@@ -127,7 +160,12 @@ async def lookup(
     try:
         adapter = registry.get(source)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        raise friendly_http_error(
+            404,
+            f"Source '{source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
 
     kwargs: dict[str, str] = {}
     if league:
@@ -168,24 +206,33 @@ async def upload_csv(
     Returns an upload_id that can be used with source='csv' in other endpoints.
     """
     if not file.filename or not file.filename.endswith(".csv"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload a CSV file",
+        raise friendly_http_error(
+            400,
+            "Please upload a CSV file",
+            hint="Make sure the file is a .csv file with UTF-8 encoding.",
+            error_code="INVALID_FILE_TYPE",
         )
 
     try:
         content = await file.read()
         content_str = content.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not decode file. Please ensure it's UTF-8 encoded.",
+        raise friendly_http_error(
+            400,
+            "Could not decode file",
+            hint="Make sure the file is UTF-8 encoded CSV with a date column.",
+            error_code="FILE_DECODE_ERROR",
         )
 
     try:
         series = parse_csv_content(content_str, name)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise friendly_http_error(
+            400,
+            str(e),
+            hint="Make sure the file is UTF-8 encoded CSV with a date column.",
+            error_code="CSV_PARSE_ERROR",
+        )
 
     upload_id = store_upload(name, series)
     return CSVUploadResponse(
@@ -229,11 +276,17 @@ async def remove_upload(upload_id: str):
     Permanently removes the uploaded data. Returns 204 on success.
     """
     if not delete_upload(upload_id):
-        raise HTTPException(status_code=404, detail="Upload not found")
+        raise friendly_http_error(
+            404,
+            "Upload not found",
+            hint="The uploaded dataset may have expired. Try uploading again.",
+            error_code="UPLOAD_NOT_FOUND",
+        )
 
 
 @router.get("/series", response_model=TimeSeries, tags=["Data"])
 async def get_series(
+    request: Request,
     source: str = Query(..., description="Data source name (e.g. pypi, coingecko)"),
     query: str = Query(..., description="Query string (e.g. package name, coin ID)"),
     start: datetime.date | None = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -262,25 +315,52 @@ async def get_series(
 
     Chain multiple transforms with pipes: `normalize|rolling_avg_7d`
     """
+    req_id = getattr(request.state, "request_id", None)
+    token = current_request_id.set(req_id)
     try:
-        adapter = registry.get(source)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        try:
+            adapter = registry.get(source)
+        except KeyError:
+            raise friendly_http_error(
+                404,
+                f"Source '{source}' not found",
+                hint="Check /api/sources for available data sources.",
+                error_code="SOURCE_NOT_FOUND",
+            )
 
-    try:
-        ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        emit_progress("cache_check", 0.1, "Checking cache")
+        try:
+            emit_progress("fetch", 0.3, f"Fetching from {source}")
+            ts = await _cache.fetch(
+                adapter, query, start=start, end=end, refresh=refresh
+            )
+        except ValueError as e:
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
 
-    if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
-    if apply:
-        ts = apply_transforms(ts, apply)
-    return ts
+        if resample:
+            ts = resample_series(
+                ts,
+                resample,
+                method=adapter.aggregation_method,
+                adapter=adapter,
+            )
+        if apply:
+            ts = apply_transforms(ts, apply)
+
+        emit_progress("complete", 1.0, "Done")
+        return ts
+    finally:
+        current_request_id.reset(token)
 
 
 @router.get("/analyze", response_model=TrendAnalysis, tags=["Analysis"])
 async def analyze_series(
+    request: Request,
     source: str = Query(..., description="Data source name"),
     query: str = Query(..., description="Query string (e.g. package name)"),
     start: datetime.date | None = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -306,29 +386,63 @@ async def analyze_series(
     - **Anomalies**: Outlier detection using z-score or IQR method
     - **Structural breaks**: Regime change detection using PELT algorithm
     """
+    req_id = getattr(request.state, "request_id", None)
+    token = current_request_id.set(req_id)
     try:
-        adapter = registry.get(source)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        try:
+            adapter = registry.get(source)
+        except KeyError:
+            raise friendly_http_error(
+                404,
+                f"Source '{source}' not found",
+                hint="Check /api/sources for available data sources.",
+                error_code="SOURCE_NOT_FOUND",
+            )
 
-    try:
-        ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        emit_progress("cache_check", 0.1, "Checking cache")
+        try:
+            emit_progress("fetch", 0.3, f"Fetching from {source}")
+            ts = await _cache.fetch(
+                adapter, query, start=start, end=end, refresh=refresh
+            )
+        except ValueError as e:
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
 
-    if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
-    if apply:
-        ts = apply_transforms(ts, apply)
+        if resample:
+            ts = resample_series(
+                ts,
+                resample,
+                method=adapter.aggregation_method,
+                adapter=adapter,
+            )
+        if apply:
+            ts = apply_transforms(ts, apply)
 
-    try:
-        return analyze(ts, anomaly_method=anomaly_method)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        emit_progress("analyze", 0.6, "Running analysis")
+        try:
+            result = analyze(ts, anomaly_method=anomaly_method)
+        except ValueError as e:
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
+
+        emit_progress("complete", 1.0, "Done")
+        return result
+    finally:
+        current_request_id.reset(token)
 
 
 @router.get("/forecast", response_model=ForecastComparison, tags=["Analysis"])
 async def forecast_series(
+    request: Request,
     source: str = Query(..., description="Data source name"),
     query: str = Query(..., description="Query string (e.g. package name)"),
     horizon: int = Query(14, ge=1, le=365, description="Forecast horizon in days"),
@@ -356,25 +470,58 @@ async def forecast_series(
     Each model is evaluated on a holdout set with MAE, RMSE, and MAPE metrics.
     The response includes a recommended model based on evaluation scores.
     """
+    req_id = getattr(request.state, "request_id", None)
+    token = current_request_id.set(req_id)
     try:
-        adapter = registry.get(source)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        try:
+            adapter = registry.get(source)
+        except KeyError:
+            raise friendly_http_error(
+                404,
+                f"Source '{source}' not found",
+                hint="Check /api/sources for available data sources.",
+                error_code="SOURCE_NOT_FOUND",
+            )
 
-    try:
-        ts = await _cache.fetch(adapter, query, start=start, end=end, refresh=refresh)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        emit_progress("cache_check", 0.1, "Checking cache")
+        try:
+            emit_progress("fetch", 0.3, f"Fetching from {source}")
+            ts = await _cache.fetch(
+                adapter, query, start=start, end=end, refresh=refresh
+            )
+        except ValueError as e:
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
 
-    if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
-    if apply:
-        ts = apply_transforms(ts, apply)
+        if resample:
+            ts = resample_series(
+                ts,
+                resample,
+                method=adapter.aggregation_method,
+                adapter=adapter,
+            )
+        if apply:
+            ts = apply_transforms(ts, apply)
 
-    try:
-        return forecast(ts, horizon=horizon)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        emit_progress("forecast", 0.9, "Running forecast models")
+        try:
+            result = forecast(ts, horizon=horizon)
+        except ValueError as e:
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
+
+        emit_progress("complete", 1.0, "Done")
+        return result
+    finally:
+        current_request_id.reset(token)
 
 
 class ForecastSnapshotResponse(BaseModel):
@@ -415,12 +562,22 @@ async def save_forecast_snapshot_endpoint(
     try:
         adapter = registry.get(source)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        raise friendly_http_error(
+            404,
+            f"Source '{source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
 
     try:
         ts = await _cache.fetch(adapter, query)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise friendly_http_error(
+            404,
+            str(e),
+            hint="Double-check the spelling, or try searching with /api/lookup.",
+            error_code="ENTITY_NOT_FOUND",
+        )
 
     forecast_result = forecast(ts, horizon=horizon)
 
@@ -492,19 +649,34 @@ async def get_forecast_accuracy(
     try:
         adapter = registry.get(source)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        raise friendly_http_error(
+            404,
+            f"Source '{source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
 
     # Fetch current (actual) data
     try:
         ts = await _cache.fetch(adapter, query)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise friendly_http_error(
+            404,
+            str(e),
+            hint="Double-check the spelling, or try searching with /api/lookup.",
+            error_code="ENTITY_NOT_FOUND",
+        )
 
     # Calculate accuracy
     accuracy = await repo.calculate_forecast_accuracy(snapshot_id, ts.points)
 
     if accuracy is None:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
+        raise friendly_http_error(
+            404,
+            "Snapshot not found",
+            hint="This forecast snapshot may have expired or been deleted.",
+            error_code="SNAPSHOT_NOT_FOUND",
+        )
 
     return accuracy
 
@@ -526,8 +698,11 @@ async def compare_series(request: CompareRequest):
         try:
             adapter = registry.get(item.source)
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail=f"Source '{item.source}' not found"
+            raise friendly_http_error(
+                404,
+                f"Source '{item.source}' not found",
+                hint="Check /api/sources for available data sources.",
+                error_code="SOURCE_NOT_FOUND",
             )
 
         try:
@@ -539,7 +714,12 @@ async def compare_series(request: CompareRequest):
                 refresh=request.refresh,
             )
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
 
         if request.resample:
             ts = resample_series(
@@ -573,7 +753,12 @@ async def compare_insight_stream(request: CompareRequest):
     Requires `ANTHROPIC_API_KEY` environment variable.
     """
     if not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="AI not configured")
+        raise friendly_http_error(
+            503,
+            "AI features are not available",
+            hint="The AI features require an API key. Contact the administrator.",
+            error_code="AI_NOT_CONFIGURED",
+        )
 
     analyses: list[TrendAnalysis] = []
     labels: list[str] = []
@@ -582,8 +767,11 @@ async def compare_insight_stream(request: CompareRequest):
         try:
             adapter = registry.get(item.source)
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail=f"Source '{item.source}' not found"
+            raise friendly_http_error(
+                404,
+                f"Source '{item.source}' not found",
+                hint="Check /api/sources for available data sources.",
+                error_code="SOURCE_NOT_FOUND",
             )
 
         ts = await _cache.fetch(
@@ -637,6 +825,61 @@ async def compare_insight_stream(request: CompareRequest):
     )
 
 
+@router.post("/cohort", response_model=CohortResponse, tags=["Comparison"])
+async def cohort_comparison(request: CohortRequest):
+    """
+    Compare a cohort of series from the same source.
+
+    Normalizes each series to percentage change from day 1, computes
+    per-member stats (total return, max drawdown, volatility), and ranks
+    members by total return.
+    """
+    import asyncio
+    import datetime as dt
+
+    from app.analysis.cohort import analyze_cohort
+
+    try:
+        adapter = registry.get(request.source)
+    except KeyError:
+        raise friendly_http_error(
+            404,
+            f"Source '{request.source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
+
+    start = dt.date.fromisoformat(request.start_date) if request.start_date else None
+    end = dt.date.fromisoformat(request.end_date) if request.end_date else None
+
+    async def fetch_one(query: str) -> TimeSeries:
+        return await _cache.fetch(adapter, query, start=start, end=end)
+
+    try:
+        all_series = await asyncio.gather(*(fetch_one(q) for q in request.queries))
+    except ValueError as e:
+        raise friendly_http_error(
+            404,
+            str(e),
+            hint="Double-check the spelling, or try searching with /api/lookup.",
+            error_code="ENTITY_NOT_FOUND",
+        )
+
+    members = analyze_cohort(list(all_series), normalize=request.normalize)
+
+    # Determine period bounds from actual data
+    all_dates = [p.date for ts in all_series for p in ts.points]
+    period_start = str(min(all_dates)) if all_dates else None
+    period_end = str(max(all_dates)) if all_dates else None
+
+    return CohortResponse(
+        source=request.source,
+        members=members,
+        period_start=period_start,
+        period_end=period_end,
+    )
+
+
 @router.post("/correlate", response_model=CorrelateResponse, tags=["Comparison"])
 async def correlate_series(request: CorrelateRequest):
     """
@@ -658,9 +901,11 @@ async def correlate_series(request: CorrelateRequest):
         try:
             adapter = registry.get(item.source)
         except KeyError:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Source '{item.source}' not found",
+            raise friendly_http_error(
+                404,
+                f"Source '{item.source}' not found",
+                hint="Check /api/sources for available data sources.",
+                error_code="SOURCE_NOT_FOUND",
             )
 
         start = item.start or request.start
@@ -675,7 +920,12 @@ async def correlate_series(request: CorrelateRequest):
                 refresh=request.refresh,
             )
         except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise friendly_http_error(
+                404,
+                str(e),
+                hint="Double-check the spelling, or try searching with /api/lookup.",
+                error_code="ENTITY_NOT_FOUND",
+            )
 
         if request.resample:
             ts = resample_series(
@@ -686,6 +936,75 @@ async def correlate_series(request: CorrelateRequest):
 
     try:
         return run_correlate(series_list[0], series_list[1])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class CausalImpactRequest(BaseModel):
+    source: str
+    query: str
+    event_date: str
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    resample: str | None = None
+    apply: str | None = None
+    refresh: bool = False
+
+
+@router.post(
+    "/causal-impact",
+    response_model=CausalImpactResponse,
+    tags=["Analysis"],
+)
+async def causal_impact(request: CausalImpactRequest):
+    """
+    Estimate the causal impact of an event on a time series.
+
+    Splits the series at the event date, builds a counterfactual forecast
+    from the pre-period, and measures how far the post-period deviates.
+
+    Returns:
+    - **pointwise**: Actual vs predicted for each post-period point with CI
+    - **cumulative_impact**: Total deviation from the counterfactual
+    - **relative_impact_pct**: Cumulative impact as a percentage of predicted
+    - **p_value**: Statistical significance of the impact
+    - **significant**: Whether p < 0.05
+    """
+    try:
+        adapter = registry.get(request.source)
+    except KeyError:
+        raise friendly_http_error(
+            404,
+            f"Source '{request.source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
+
+    try:
+        ts = await _cache.fetch(
+            adapter,
+            request.query,
+            start=request.start,
+            end=request.end,
+            refresh=request.refresh,
+        )
+    except ValueError as e:
+        raise friendly_http_error(
+            404,
+            str(e),
+            hint="Double-check the spelling, or try searching with /api/lookup.",
+            error_code="ENTITY_NOT_FOUND",
+        )
+
+    if request.resample:
+        ts = resample_series(
+            ts, request.resample, method=adapter.aggregation_method, adapter=adapter
+        )
+    if request.apply:
+        ts = apply_transforms(ts, request.apply)
+
+    try:
+        return await analyze_causal_impact(ts, request.event_date)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -732,7 +1051,12 @@ async def get_view(hash_id: str):
     """
     view = await repo.get_view_by_hash(hash_id)
     if view is None:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise friendly_http_error(
+            404,
+            "View not found",
+            hint="This saved view may have been deleted.",
+            error_code="VIEW_NOT_FOUND",
+        )
     return view
 
 
@@ -745,7 +1069,12 @@ async def delete_view(hash_id: str):
     """
     deleted = await repo.delete_view(hash_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="View not found")
+        raise friendly_http_error(
+            404,
+            "View not found",
+            hint="This saved view may have been deleted.",
+            error_code="VIEW_NOT_FOUND",
+        )
 
 
 # --- Watchlist Endpoints ---
@@ -792,71 +1121,7 @@ async def check_watchlist() -> WatchlistCheckResponse:
     thresholds have been crossed. Returns all items with their current
     status and a list of triggered alerts.
     """
-    items = await repo.list_watchlist()
-    now = datetime.datetime.now(datetime.UTC)
-    updated_items: list[WatchlistItemResponse] = []
-    alerts: list[WatchlistItemResponse] = []
-
-    for item in items:
-        try:
-            adapter = registry.get(item.source)
-            ts = await _cache.fetch(adapter, item.query)
-
-            if item.resample:
-                ts = resample_series(
-                    ts,
-                    item.resample,
-                    method=adapter.aggregation_method,
-                    adapter=adapter,
-                )
-
-            # Get latest value and trend
-            if ts.points:
-                latest_value = ts.points[-1].value
-                trend_direction = None
-
-                # Calculate simple trend from last 5 points
-                if len(ts.points) >= 5:
-                    recent = [p.value for p in ts.points[-5:]]
-                    if recent[-1] > recent[0] * 1.05:
-                        trend_direction = "rising"
-                    elif recent[-1] < recent[0] * 0.95:
-                        trend_direction = "falling"
-                    else:
-                        trend_direction = "stable"
-
-                # Update the item
-                updated = await repo.update_watchlist_item(
-                    item.id, last_value=latest_value, last_checked_at=now
-                )
-
-                if updated:
-                    # Check threshold
-                    triggered = False
-                    if item.threshold_direction and item.threshold_value is not None:
-                        if item.threshold_direction == "above":
-                            triggered = latest_value > item.threshold_value
-                        elif item.threshold_direction == "below":
-                            triggered = latest_value < item.threshold_value
-
-                    updated.triggered = triggered
-                    updated.trend_direction = trend_direction
-                    updated_items.append(updated)
-
-                    if triggered:
-                        alerts.append(updated)
-            else:
-                updated_items.append(item)
-
-        except Exception as e:
-            logger.warning(f"Failed to check watchlist item {item.id}: {e}")
-            updated_items.append(item)
-
-    return WatchlistCheckResponse(
-        items=updated_items,
-        checked_at=now,
-        alerts=alerts,
-    )
+    return await run_watchlist_check(cache=_cache)
 
 
 @router.get(
@@ -868,7 +1133,12 @@ async def get_watchlist_item(item_id: int):
     """
     item = await repo.get_watchlist_item(item_id)
     if item is None:
-        raise HTTPException(status_code=404, detail="Watchlist item not found")
+        raise friendly_http_error(
+            404,
+            "Watchlist item not found",
+            hint="This watchlist item may have been deleted.",
+            error_code="WATCHLIST_ITEM_NOT_FOUND",
+        )
     return item
 
 
@@ -879,7 +1149,118 @@ async def delete_from_watchlist(item_id: int):
     """
     deleted = await repo.delete_watchlist_item(item_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Watchlist item not found")
+        raise friendly_http_error(
+            404,
+            "Watchlist item not found",
+            hint="This watchlist item may have been deleted.",
+            error_code="WATCHLIST_ITEM_NOT_FOUND",
+        )
+
+
+# --- Notification endpoints ---
+
+
+@router.get(
+    "/notifications/config",
+    response_model=NotificationConfigResponse | None,
+    tags=["Notifications"],
+)
+async def get_notification_config():
+    """Return the current notification config, or null."""
+    cfg = await repo.get_notification_config()
+    if cfg is None:
+        return None
+    return NotificationConfigResponse(
+        webhook_url=cfg.webhook_url,
+        channel=cfg.channel,
+        enabled=cfg.enabled,
+        created_at=cfg.created_at,
+    )
+
+
+@router.post(
+    "/notifications/config",
+    response_model=NotificationConfigResponse,
+    tags=["Notifications"],
+)
+async def save_notification_config(
+    request: NotificationConfigRequest,
+):
+    """Save or update the notification webhook config."""
+    cfg = await repo.save_notification_config(
+        webhook_url=request.webhook_url,
+        channel=request.channel,
+        enabled=request.enabled,
+    )
+    return NotificationConfigResponse(
+        webhook_url=cfg.webhook_url,
+        channel=cfg.channel,
+        enabled=cfg.enabled,
+        created_at=cfg.created_at,
+    )
+
+
+@router.get(
+    "/notifications/status",
+    response_model=NotificationStatusResponse,
+    tags=["Notifications"],
+)
+async def get_notification_status():
+    """Return the notification scheduler status."""
+    from app.notifications.scheduler import notification_scheduler
+
+    return NotificationStatusResponse(
+        running=notification_scheduler.running,
+        last_check=(
+            notification_scheduler.last_check.isoformat()
+            if notification_scheduler.last_check
+            else None
+        ),
+        next_check=(
+            notification_scheduler.next_check.isoformat()
+            if notification_scheduler.next_check
+            else None
+        ),
+        interval=settings.notification_check_interval,
+    )
+
+
+@router.post("/notifications/test", tags=["Notifications"])
+async def test_notification():
+    """Send a test webhook with dummy alert data."""
+    cfg = await repo.get_notification_config()
+    if cfg is None:
+        raise friendly_http_error(
+            400,
+            "No notification config found",
+            hint="Save a webhook URL first.",
+            error_code="NO_NOTIFICATION_CONFIG",
+        )
+
+    from app.notifications.webhook import send_webhook
+
+    dummy_alert = WatchlistItemResponse(
+        id=0,
+        name="Test Alert",
+        source="test",
+        query="test_query",
+        threshold_direction="above",
+        threshold_value=100.0,
+        last_value=150.0,
+        created_at=datetime.datetime.now(datetime.UTC),
+        triggered=True,
+        trend_direction="rising",
+    )
+
+    ok = await send_webhook(cfg.webhook_url, cfg.channel, [dummy_alert])
+    if ok:
+        return {"status": "ok", "message": "Test webhook sent"}
+    raise friendly_http_error(
+        502,
+        "Webhook delivery failed",
+        hint="Check that the URL is correct and reachable.",
+        error_code="WEBHOOK_FAILED",
+    )
 
 
 @router.get("/export-pdf", tags=["Analysis"])
@@ -906,15 +1287,27 @@ async def export_pdf(
     try:
         adapter = registry.get(source)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        raise friendly_http_error(
+            404,
+            f"Source '{source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
 
     try:
         ts = await _cache.fetch(adapter, query, start=start, end=end)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise friendly_http_error(
+            404,
+            str(e),
+            hint="Double-check the spelling, or try searching with /api/lookup.",
+            error_code="ENTITY_NOT_FOUND",
+        )
 
     if resample:
-        ts = resample_series(ts, resample, method=adapter.aggregation_method, adapter=adapter)
+        ts = resample_series(
+            ts, resample, method=adapter.aggregation_method, adapter=adapter
+        )
     if apply:
         ts = apply_transforms(ts, apply)
 
@@ -964,12 +1357,22 @@ async def insight_stream(
     try:
         adapter = registry.get(source)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Source '{source}' not found")
+        raise friendly_http_error(
+            404,
+            f"Source '{source}' not found",
+            hint="Check /api/sources for available data sources.",
+            error_code="SOURCE_NOT_FOUND",
+        )
 
     try:
         ts = await _cache.fetch(adapter, query, start=start, end=end)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise friendly_http_error(
+            404,
+            str(e),
+            hint="Double-check the spelling, or try searching with /api/lookup.",
+            error_code="ENTITY_NOT_FOUND",
+        )
 
     analysis = analyze(ts)
     forecast_result = forecast(ts, horizon=horizon)
@@ -1142,11 +1545,17 @@ DATA DETAILS:
 - Date range: {ctx.date_range} ({ctx.data_points_count} points)
 - Values: min={ctx.min_value:.2f}, max={ctx.max_value:.2f}, mean={ctx.mean_value:.2f}
 - Trend: {ctx.trend_direction} (momentum: {ctx.trend_momentum:.4f})
-- Seasonality: {"Yes, " + str(ctx.seasonality_period) + "-day period" if ctx.seasonality_detected else "None detected"}
+- Seasonality: {
+            "Yes, " + str(ctx.seasonality_period) + "-day period"
+            if ctx.seasonality_detected
+            else "None detected"
+        }
 - Anomalies: {ctx.anomaly_count} flagged
 - Structural breaks: {len(ctx.structural_breaks)}
 
-Recent values: {", ".join(f"{v['date']}: {v['value']:.2f}" for v in ctx.recent_values[-5:])}
+Recent values: {
+            ", ".join(f"{v['date']}: {v['value']:.2f}" for v in ctx.recent_values[-5:])
+        }
 """
         if ctx.anomalies:
             anomaly_dates = ", ".join(a["date"] for a in ctx.anomalies[:5])
@@ -1158,14 +1567,20 @@ Recent values: {", ".join(f"{v['date']}: {v['value']:.2f}" for v in ctx.recent_v
             data_section += f"Forecast ({ctx.forecast_horizon}d): {forecast_str}\n"
 
     # Build messages with system context
-    system_prompt = f"""You are a helpful data analyst assistant. You previously provided an analysis
-of time series data for {request.source} - {request.query}.
-
-Your initial analysis was:
-{request.context_summary}
-{data_section}
-Now answer the user's follow-up questions about this data. Be concise but thorough.
-Use markdown formatting. You have access to the actual data details above - use them to give specific answers."""
+    system_prompt = (
+        f"You are a helpful data analyst assistant."
+        f" You previously provided an analysis"
+        f" of time series data for {request.source}"
+        f" - {request.query}.\n\n"
+        f"Your initial analysis was:\n"
+        f"{request.context_summary}\n"
+        f"{data_section}\n"
+        f"Now answer the user's follow-up questions"
+        f" about this data. Be concise but thorough.\n"
+        f"Use markdown formatting. You have access to"
+        f" the actual data details above - use them"
+        f" to give specific answers."
+    )
 
     messages = [{"role": "system", "content": system_prompt}]
     for msg in request.messages:
@@ -1208,16 +1623,14 @@ async def compare_insight_followup_stream(request: CompareInsightFollowupRequest
     llm = LLMClient(api_key=settings.anthropic_api_key)
 
     # Build series descriptions for context
-    series_desc = ", ".join(
-        f"{item.source}:{item.query}" for item in request.items
-    )
+    series_desc = ", ".join(f"{item.source}:{item.query}" for item in request.items)
 
     # Build data context section for each series
     data_section = ""
     if request.data_contexts:
         for i, ctx in enumerate(request.data_contexts):
             item = request.items[i] if i < len(request.items) else None
-            label = f"{item.source}:{item.query}" if item else f"Series {i+1}"
+            label = f"{item.source}:{item.query}" if item else f"Series {i + 1}"
             data_section += f"""
 {label}:
 - Date range: {ctx.date_range} ({ctx.data_points_count} points)
@@ -1226,16 +1639,24 @@ async def compare_insight_followup_stream(request: CompareInsightFollowupRequest
 - Anomalies: {ctx.anomaly_count} flagged
 """
             if ctx.anomalies:
-                data_section += f"  Anomaly dates: {', '.join(a['date'] for a in ctx.anomalies[:3])}\n"
+                anomaly_str = ", ".join(a["date"] for a in ctx.anomalies[:3])
+                data_section += f"  Anomaly dates: {anomaly_str}\n"
 
-    system_prompt = f"""You are a helpful data analyst assistant. You previously provided a comparison
-analysis of multiple time series: {series_desc}
-
-Your initial comparison was:
-{request.context_summary}
-{data_section}
-Now answer the user's follow-up questions about this comparison. Be concise but thorough.
-Use markdown formatting. You have access to the actual data details above - use them to give specific answers."""
+    system_prompt = (
+        f"You are a helpful data analyst assistant."
+        f" You previously provided a comparison"
+        f" analysis of multiple time series:"
+        f" {series_desc}\n\n"
+        f"Your initial comparison was:\n"
+        f"{request.context_summary}\n"
+        f"{data_section}\n"
+        f"Now answer the user's follow-up questions"
+        f" about this comparison. Be concise but"
+        f" thorough.\n"
+        f"Use markdown formatting. You have access to"
+        f" the actual data details above - use them"
+        f" to give specific answers."
+    )
 
     messages = [{"role": "system", "content": system_prompt}]
     for msg in request.messages:
@@ -1255,3 +1676,63 @@ Use markdown formatting. You have access to the actual data details above - use 
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get(
+    "/event-context",
+    response_model=list[EventContext],
+    tags=["AI"],
+)
+async def event_context(
+    source: str = Query(..., description="Data source name"),
+    query: str = Query(..., description="Query string"),
+    dates: str = Query(
+        ...,
+        description="Comma-separated dates (YYYY-MM-DD)",
+    ),
+):
+    """
+    Fetch real-world event context for specific dates.
+
+    Queries DuckDuckGo and Wikipedia to find events
+    that may explain anomalies or spikes in the data.
+    Best-effort: returns empty list on failure.
+    """
+    from app.ai.event_context import fetch_event_context
+
+    date_list = [d.strip() for d in dates.split(",") if d.strip()]
+    topic = f"{source} {query}"
+    return await fetch_event_context(topic, date_list)
+
+
+# --- Plugin management ---
+
+
+@router.get(
+    "/plugins",
+    response_model=list[PluginInfo],
+    tags=["System"],
+)
+async def list_plugins():
+    """
+    List all discovered plugins with their status.
+
+    Scans the plugins/ directory for flat .py files and
+    directory plugins with plugin.json manifests.
+    """
+    return scan_plugins()
+
+
+@router.post(
+    "/plugins/reload",
+    response_model=list[PluginInfo],
+    tags=["System"],
+)
+async def reload_plugins_endpoint():
+    """
+    Re-scan and re-load all plugins.
+
+    Unregisters existing plugin adapters and re-imports them.
+    Returns the updated plugin list.
+    """
+    return reload_plugins()

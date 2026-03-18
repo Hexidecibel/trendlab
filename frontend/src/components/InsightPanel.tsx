@@ -9,6 +9,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import SendIcon from '@mui/icons-material/Send'
 import ReactMarkdown from 'react-markdown'
+import { API_BASE } from '../api/client'
 import type { TimeSeries, TrendAnalysis, ForecastComparison, DataContext } from '../api/types'
 
 interface ChatMessage {
@@ -104,7 +105,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
       query,
       horizon: String(horizon),
     })
-    const es = new EventSource(`/api/insight?${params}`)
+    const es = new EventSource(`${API_BASE}/insight?${params}`)
     eventSourceRef.current = es
 
     es.addEventListener('delta', (e) => {
@@ -151,7 +152,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
     ]
 
     try {
-      const response = await fetch('/api/insight-followup', {
+      const response = await fetch(`${API_BASE}/insight-followup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

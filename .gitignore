@@ -35,3 +35,14 @@ htmlcov/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+
+# Claude Code
+.claude/settings.local.json
+
+# Security: prevent accidental commits
+*.db
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx

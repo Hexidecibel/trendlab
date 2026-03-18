@@ -3,10 +3,12 @@
 from collections.abc import AsyncGenerator
 
 from app.ai.client import LLMClient
+from app.ai.event_context import fetch_event_context
 from app.ai.prompts import build_messages
 from app.config import settings
 from app.logging_config import get_logger
 from app.models.schemas import (
+    EventContext,
     ForecastComparison,
     InsightReport,
     TrendAnalysis,
@@ -24,6 +26,24 @@ def _get_client(client: LLMClient | None) -> LLMClient:
     return LLMClient(api_key=settings.anthropic_api_key)
 
 
+async def _get_event_contexts(
+    analysis: TrendAnalysis,
+) -> list[EventContext]:
+    """Best-effort fetch of event context for anomalies."""
+    if not analysis.anomalies.anomalies:
+        return []
+    try:
+        dates = [
+            str(a.date)
+            for a in analysis.anomalies.anomalies
+        ]
+        topic = analysis.query
+        return await fetch_event_context(topic, dates)
+    except Exception:
+        logger.debug("Event context fetch failed")
+        return []
+
+
 async def summarize(
     analysis: TrendAnalysis,
     forecast: ForecastComparison,
@@ -32,7 +52,13 @@ async def summarize(
 ) -> InsightReport:
     """Generate a narrative insight report from analysis and forecast data."""
     llm = _get_client(client)
-    messages = build_messages(analysis, forecast, version=prompt_version)
+    events = await _get_event_contexts(analysis)
+    messages = build_messages(
+        analysis,
+        forecast,
+        version=prompt_version,
+        event_contexts=events or None,
+    )
     summary_text = await llm.generate(messages)
 
     return InsightReport(
@@ -54,7 +80,13 @@ async def summarize_stream(
 ) -> AsyncGenerator[str, None]:
     """Stream LLM-generated text chunks for the insight."""
     llm = _get_client(client)
-    messages = build_messages(analysis, forecast, version=prompt_version)
+    events = await _get_event_contexts(analysis)
+    messages = build_messages(
+        analysis,
+        forecast,
+        version=prompt_version,
+        event_contexts=events or None,
+    )
     async for chunk in llm.stream(messages):
         yield chunk
 
@@ -97,7 +129,10 @@ async def summarize_compare_stream(
         desc = f"""
 **{label}**:
 - Trend: {analysis.trend.direction} (momentum: {analysis.trend.momentum:.4f})
-- Seasonality: {'Yes, ' + str(analysis.seasonality.period_days) + '-day period' if analysis.seasonality.detected else 'None detected'}
+- Seasonality: {
+    'Yes, ' + str(analysis.seasonality.period_days) + '-day period'
+    if analysis.seasonality.detected else 'None detected'
+}
 - Anomalies: {analysis.anomalies.anomaly_count} flagged
 - Structural breaks: {len(analysis.structural_breaks)}
 """

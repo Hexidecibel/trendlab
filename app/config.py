@@ -28,6 +28,13 @@ class Settings:
         self.port: int = int(os.environ.get("PORT", "8000"))
         # Secret phrase for access control (None = no auth required)
         self.secret_phrase: str | None = os.environ.get("TRENDLAB_SECRET_PHRASE")
+        # Notification settings
+        self.notification_webhook_url: str | None = os.environ.get(
+            "NOTIFICATION_WEBHOOK_URL"
+        )
+        self.notification_check_interval: int = int(
+            os.environ.get("NOTIFICATION_CHECK_INTERVAL", "1800")
+        )
 
 
 settings = Settings()

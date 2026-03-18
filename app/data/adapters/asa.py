@@ -24,7 +24,9 @@ _asa_last_request = 0.0
 _ASA_REQUEST_DELAY = 0.5  # seconds between requests
 
 
-async def _rate_limited_get(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+async def _rate_limited_get(
+    client: httpx.AsyncClient, url: str, **kwargs
+) -> httpx.Response:
     """Make a rate-limited GET request to ASA API."""
     global _asa_last_request
     async with _asa_lock:

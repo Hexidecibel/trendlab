@@ -106,28 +106,26 @@ class TestBuildQueryString:
         """ASA adapter joins fields with colons."""
         fields = {
             "league": "mls",
-            "entity_type": "teams",
-            "entity": "jYQJ19EqGR",
+            "team": "jYQJ19EqGR",
             "metric": "xgoals_for",
             "home_away": "home",
             "stage": "regular",
         }
         result = build_query_string("asa", fields)
-        assert result == "mls:teams:jYQJ19EqGR:xgoals_for:home:regular"
+        assert result == "mls:jYQJ19EqGR:xgoals_for:home:regular"
 
     def test_field_order_matches_form_fields(self):
         """Fields should be joined in the order defined by form_fields."""
         fields = {
             "metric": "goals_for",
             "league": "nwsl",
-            "entity_type": "teams",
-            "entity": "abc",
+            "team": "abc",
             "home_away": "all",
             "stage": "all",
         }
         result = build_query_string("asa", fields)
-        # Order: league, entity_type, entity, metric, home_away, stage
-        assert result == "nwsl:teams:abc:goals_for:all:all"
+        # Order: league, team, metric, home_away, stage
+        assert result == "nwsl:abc:goals_for:all:all"
 
 
 class TestExtractJson:
@@ -207,15 +205,17 @@ class TestResolveEntities:
     async def test_passes_depends_on_kwargs_to_lookup(self):
         mock_adapter = MagicMock()
         mock_adapter.form_fields.return_value = [
-            _field("entity", "autocomplete", depends_on="league"),
+            _field("team", "autocomplete", depends_on="league"),
         ]
         mock_adapter.lookup = AsyncMock(return_value=MOCK_LOOKUP_ITEMS)
 
         with patch("app.ai.query_parser.registry") as mock_registry:
             mock_registry.get.return_value = mock_adapter
 
-            await resolve_entities("asa", {"league": "mls", "entity": "LA Galaxy"})
-            mock_adapter.lookup.assert_called_once_with("teams", league="mls")
+            await resolve_entities("asa", {"league": "mls", "team": "LA Galaxy"})
+            mock_adapter.lookup.assert_called_once_with(
+                "team", league="mls", search="LA Galaxy"
+            )
 
 
 class TestParseAndResolve:

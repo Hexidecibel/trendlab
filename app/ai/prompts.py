@@ -1,6 +1,10 @@
 """Prompt templates, context formatter, and version registry for AI commentary."""
 
-from app.models.schemas import ForecastComparison, TrendAnalysis
+from app.models.schemas import (
+    EventContext,
+    ForecastComparison,
+    TrendAnalysis,
+)
 
 SYSTEM_PROMPT = (
     "You are a concise data analyst who explains trends to non-technical users. "
@@ -126,6 +130,25 @@ def format_analysis_context(
     return "\n".join(lines)
 
 
+def format_event_context(
+    events: list[EventContext],
+) -> str:
+    """Format event context into LLM-ready text."""
+    if not events:
+        return ""
+    lines = [
+        "",
+        "Possibly related real-world events near anomaly dates:",
+    ]
+    for ev in events:
+        line = f"  - {ev.date}: {ev.headline}"
+        if ev.relevance:
+            line += f" (via {ev.relevance})"
+        lines.append(line)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def get_prompt(version: str = "default") -> str:
     """Return a prompt template by version name.
 
@@ -143,12 +166,15 @@ def build_messages(
     analysis: TrendAnalysis,
     forecast: ForecastComparison,
     version: str = "default",
+    event_contexts: list[EventContext] | None = None,
 ) -> list[dict]:
     """Build the message list for the Anthropic API.
 
     Returns [{"role": "system", ...}, {"role": "user", ...}].
     """
     context = format_analysis_context(analysis, forecast)
+    if event_contexts:
+        context += format_event_context(event_contexts)
     template = get_prompt(version)
     user_content = template.format(context=context)
 

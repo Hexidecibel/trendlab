@@ -29,7 +29,12 @@
       "Bash(npm install:*)",
       "Bash(ipconfig getifaddr:*)",
       "WebFetch(domain:app.americansocceranalysis.com)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(export:*)",
+      "Bash(. \"$NVM_DIR/nvm.sh\")",
+      "Bash(nvm use:*)",
+      "Bash(NODE_ENV=development ./node_modules/.bin/vite build:*)",
+      "Bash(git push:*)"
     ]
   }
 }

@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 # Import and patch settings before app imports it
 from app import config  # noqa: E402
+
 config.settings.secret_phrase = None  # Explicitly disable auth
 
 from app.main import app  # noqa: E402

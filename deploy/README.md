@@ -126,7 +126,7 @@ ANTHROPIC_API_KEY=sk-ant-...    # Required for AI features
 GITHUB_TOKEN=ghp_...            # Optional: GitHub stars adapter
 LOG_LEVEL=INFO                  # DEBUG, INFO, WARNING, ERROR
 RATE_LIMIT_ENABLED=true         # Protect from abuse
-TRENDLAB_SECRET_PHRASE=trendy   # Secret phrase to unlock the app
+TRENDLAB_SECRET_PHRASE=your-secret-here   # Secret phrase to unlock the app
 ```
 
 ## Authentication

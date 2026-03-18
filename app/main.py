@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +12,7 @@ from app.config import settings
 from app.data.adapters.asa import ASAAdapter
 from app.data.adapters.coingecko import CoinGeckoAdapter
 from app.data.adapters.csv_upload import CSVUploadAdapter
+from app.data.adapters.google_trends import GoogleTrendsAdapter
 from app.data.adapters.npm import NpmAdapter
 from app.data.adapters.pypi import PyPIAdapter
 from app.data.adapters.reddit import RedditAdapter
@@ -22,13 +23,14 @@ from app.data.registry import registry
 from app.db.engine import init_db
 from app.logging_config import get_logger, setup_logging
 from app.middleware import (
+    DeprecationMiddleware,
     RateLimitConfig,
     RateLimitMiddleware,
     RequestLoggingMiddleware,
     SecretPhraseMiddleware,
 )
 from app.plugins import load_plugins
-from app.routers import api
+from app.routers import api, ws
 
 # Initialize logging before anything else
 setup_logging(
@@ -47,6 +49,7 @@ registry.register(ASAAdapter())
 registry.register(WikipediaAdapter())
 registry.register(YahooFinanceAdapter())
 registry.register(WeatherAdapter())
+registry.register(GoogleTrendsAdapter())
 
 if settings.github_token:
     from app.data.adapters.github import GitHubStarsAdapter
@@ -73,7 +76,11 @@ if plugin_count:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from app.notifications.scheduler import notification_scheduler
+
+    notification_scheduler.start(app)
     yield
+    await notification_scheduler.stop()
 
 
 app = FastAPI(
@@ -150,6 +157,9 @@ app.add_middleware(
 # Request logging middleware (added after CORS so it sees the processed request)
 app.add_middleware(RequestLoggingMiddleware)
 
+# API versioning deprecation headers
+app.add_middleware(DeprecationMiddleware)
+
 # Rate limiting middleware (configurable via environment)
 rate_limit_config = RateLimitConfig(
     requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")),
@@ -162,12 +172,34 @@ app.add_middleware(RateLimitMiddleware, config=rate_limit_config)
 # Secret phrase authentication (if configured)
 app.add_middleware(SecretPhraseMiddleware)
 
-app.include_router(api.router, prefix="/api")
+# Versioned API (canonical — included in OpenAPI schema)
+app.include_router(api.router, prefix="/api/v1")
+
+# Unversioned API (backward compat — hidden from schema)
+app.include_router(api.router, prefix="/api", include_in_schema=False)
+
+# WebSocket router for live progress updates
+app.include_router(ws.router, prefix="/api")
 
 
 def _get_request_id(request: Request) -> str | None:
     """Extract request ID from request state if available."""
     return getattr(request.state, "request_id", None)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = _get_request_id(request)
+    if isinstance(exc.detail, dict):
+        content = {**exc.detail, "request_id": request_id}
+    else:
+        content = {
+            "detail": exc.detail,
+            "hint": None,
+            "error_code": None,
+            "request_id": request_id,
+        }
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 @app.exception_handler(ValueError)
@@ -180,7 +212,12 @@ async def value_error_handler(request: Request, exc: ValueError):
     ).warning("Validation error: %s", str(exc))
     return JSONResponse(
         status_code=422,
-        content={"detail": str(exc), "request_id": request_id},
+        content={
+            "detail": str(exc),
+            "hint": "Check your query parameters and try again.",
+            "error_code": "VALIDATION_ERROR",
+            "request_id": request_id,
+        },
     )
 
 
@@ -196,7 +233,13 @@ async def http_status_error_handler(request: Request, exc: httpx.HTTPStatusError
     return JSONResponse(
         status_code=503,
         content={
-            "detail": f"External API error: {exc.response.status_code}",
+            "detail": (
+                "The data source returned an error. This usually"
+                " means the item wasn't found or the service is"
+                " temporarily unavailable."
+            ),
+            "hint": "Try again in a moment, or check that your query is correct.",
+            "error_code": "EXTERNAL_API_ERROR",
             "request_id": request_id,
         },
     )
@@ -212,7 +255,15 @@ async def connect_error_handler(request: Request, exc: httpx.ConnectError):
     ).warning("External service unavailable")
     return JSONResponse(
         status_code=503,
-        content={"detail": "External service unavailable", "request_id": request_id},
+        content={
+            "detail": (
+                "Couldn't reach the external data source."
+                " The service may be temporarily down."
+            ),
+            "hint": "Wait a moment and try again.",
+            "error_code": "EXTERNAL_UNAVAILABLE",
+            "request_id": request_id,
+        },
     )
 
 
@@ -226,7 +277,12 @@ async def timeout_error_handler(request: Request, exc: httpx.TimeoutException):
     ).warning("External service timeout")
     return JSONResponse(
         status_code=503,
-        content={"detail": "External service timeout", "request_id": request_id},
+        content={
+            "detail": "The data source is taking too long to respond.",
+            "hint": "Try again shortly, or try a smaller date range.",
+            "error_code": "EXTERNAL_TIMEOUT",
+            "request_id": request_id,
+        },
     )
 
 
@@ -241,7 +297,14 @@ async def generic_error_handler(request: Request, exc: Exception):
     ).exception("Unhandled error")
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error", "request_id": request_id},
+        content={
+            "detail": "Something unexpected went wrong.",
+            "hint": (
+                "If this keeps happening, note the request ID and report the issue."
+            ),
+            "error_code": "INTERNAL_ERROR",
+            "request_id": request_id,
+        },
     )
 
 
