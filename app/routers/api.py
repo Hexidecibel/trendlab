@@ -1558,15 +1558,72 @@ Recent values: {
         }
 """
         if ctx.anomalies:
-            anomaly_dates = ", ".join(a["date"] for a in ctx.anomalies[:5])
-            data_section += f"Anomaly dates: {anomaly_dates}\n"
+            anomaly_dates = ", ".join(
+                a["date"] for a in ctx.anomalies[:5]
+            )
+            data_section += (
+                f"Anomaly dates: {anomaly_dates}\n"
+            )
         if ctx.forecast_values:
             forecast_str = ", ".join(
-                f"{v['date']}: {v['value']:.2f}" for v in ctx.forecast_values[:5]
+                f"{v['date']}: {v['value']:.2f}"
+                for v in ctx.forecast_values[:5]
             )
-            data_section += f"Forecast ({ctx.forecast_horizon}d): {forecast_str}\n"
+            data_section += (
+                f"Forecast ({ctx.forecast_horizon}d):"
+                f" {forecast_str}\n"
+            )
+
+    # Fetch event context for anomaly dates
+    event_section = ""
+    if request.data_context and request.data_context.anomalies:
+        try:
+            from app.ai.event_context import (
+                fetch_event_context,
+            )
+
+            dates = [
+                a["date"]
+                for a in request.data_context.anomalies[:5]
+            ]
+            topic = f"{request.source} {request.query}"
+            events = await fetch_event_context(
+                topic, dates
+            )
+            if events:
+                lines = []
+                for ev in events:
+                    src = (
+                        f" ({ev.source_url})"
+                        if ev.source_url
+                        else ""
+                    )
+                    lines.append(
+                        f"- {ev.date}: "
+                        f'"{ev.headline}"{src}'
+                    )
+                event_section = (
+                    "\nRELEVANT EVENTS:\n"
+                    + "\n".join(lines)
+                    + "\n"
+                )
+                data_section += event_section
+        except Exception:
+            logger.debug(
+                "Event context fetch failed for "
+                "followup: %s",
+                request.query,
+            )
 
     # Build messages with system context
+    has_events = bool(event_section)
+    event_instruction = (
+        " You also have real-world event context"
+        " for anomaly dates - reference these events"
+        " when explaining data movements or spikes."
+        if has_events
+        else ""
+    )
     system_prompt = (
         f"You are a helpful data analyst assistant."
         f" You previously provided an analysis"
@@ -1580,6 +1637,7 @@ Recent values: {
         f"Use markdown formatting. You have access to"
         f" the actual data details above - use them"
         f" to give specific answers."
+        f"{event_instruction}"
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -1639,9 +1697,86 @@ async def compare_insight_followup_stream(request: CompareInsightFollowupRequest
 - Anomalies: {ctx.anomaly_count} flagged
 """
             if ctx.anomalies:
-                anomaly_str = ", ".join(a["date"] for a in ctx.anomalies[:3])
-                data_section += f"  Anomaly dates: {anomaly_str}\n"
+                anomaly_str = ", ".join(
+                    a["date"]
+                    for a in ctx.anomalies[:3]
+                )
+                data_section += (
+                    f"  Anomaly dates: {anomaly_str}\n"
+                )
 
+    # Fetch event context for anomaly dates
+    event_section = ""
+    if request.data_contexts:
+        try:
+            from app.ai.event_context import (
+                fetch_event_context,
+            )
+
+            all_dates: list[str] = []
+            topic_parts: list[str] = []
+            for i, ctx in enumerate(
+                request.data_contexts
+            ):
+                if ctx.anomalies:
+                    all_dates.extend(
+                        a["date"]
+                        for a in ctx.anomalies[:3]
+                    )
+                item = (
+                    request.items[i]
+                    if i < len(request.items)
+                    else None
+                )
+                if item:
+                    topic_parts.append(
+                        f"{item.source} {item.query}"
+                    )
+            if all_dates:
+                topic = (
+                    topic_parts[0]
+                    if topic_parts
+                    else series_desc
+                )
+                # Deduplicate dates
+                unique_dates = list(
+                    dict.fromkeys(all_dates)
+                )
+                events = await fetch_event_context(
+                    topic, unique_dates
+                )
+                if events:
+                    lines = []
+                    for ev in events:
+                        src = (
+                            f" ({ev.source_url})"
+                            if ev.source_url
+                            else ""
+                        )
+                        lines.append(
+                            f"- {ev.date}: "
+                            f'"{ev.headline}"{src}'
+                        )
+                    event_section = (
+                        "\nRELEVANT EVENTS:\n"
+                        + "\n".join(lines)
+                        + "\n"
+                    )
+                    data_section += event_section
+        except Exception:
+            logger.debug(
+                "Event context fetch failed for "
+                "compare followup"
+            )
+
+    has_events = bool(event_section)
+    event_instruction = (
+        " You also have real-world event context"
+        " for anomaly dates - reference these events"
+        " when explaining data movements or spikes."
+        if has_events
+        else ""
+    )
     system_prompt = (
         f"You are a helpful data analyst assistant."
         f" You previously provided a comparison"
@@ -1656,6 +1791,7 @@ async def compare_insight_followup_stream(request: CompareInsightFollowupRequest
         f"Use markdown formatting. You have access to"
         f" the actual data details above - use them"
         f" to give specific answers."
+        f"{event_instruction}"
     )
 
     messages = [{"role": "system", "content": system_prompt}]
