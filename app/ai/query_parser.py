@@ -70,12 +70,13 @@ def build_catalog_prompt() -> str:
 
 
 def _find_best_match(query: str, items: list[LookupItem]) -> LookupItem | None:
-    """Find the best matching lookup item for a human-readable name.
+    """Find the best matching lookup item for a human query.
 
     Matching priority:
     1. Exact match (case-insensitive)
     2. Substring containment
-    3. Token overlap (Jaccard similarity >= 0.3)
+    3. Acronym matching (first letters of words)
+    4. Token overlap (Jaccard similarity >= 0.3)
     """
     query_lower = query.lower().strip()
     if not query_lower or not items:
@@ -92,7 +93,18 @@ def _find_best_match(query: str, items: list[LookupItem]) -> LookupItem | None:
         if query_lower in label_lower or label_lower in query_lower:
             return item
 
-    # 3. Token overlap (Jaccard)
+    # 3. Acronym matching – e.g. "LAFC" → "Los Angeles FC"
+    for item in items:
+        words = item.label.split()
+        if len(words) > 1:
+            # Keep all-caps words whole (FC→FC), else first letter
+            acronym = "".join(
+                w if w.isupper() else w[0] for w in words
+            ).lower()
+            if query_lower == acronym:
+                return item
+
+    # 4. Token overlap (Jaccard)
     query_tokens = set(query_lower.split())
     best_score = 0.0
     best_item = None
