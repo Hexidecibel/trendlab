@@ -16,6 +16,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import SaveIcon from '@mui/icons-material/Save'
 import type { ForecastComparison } from '../api/types'
+import { formatPrecise } from '../utils/format'
 
 interface Snapshot {
   id: number
@@ -190,12 +191,12 @@ export function ForecastAccuracyPanel({ source, query, forecast }: Props) {
                         <TableCell>{snapshot.horizon}d</TableCell>
                         <TableCell>
                           {accuracy ? (
-                            accuracy.mae !== null ? accuracy.mae.toFixed(2) : '-'
+                            accuracy.mae !== null ? formatPrecise(accuracy.mae) : '-'
                           ) : '-'}
                         </TableCell>
                         <TableCell>
                           {accuracy ? (
-                            accuracy.rmse !== null ? accuracy.rmse.toFixed(2) : '-'
+                            accuracy.rmse !== null ? formatPrecise(accuracy.rmse) : '-'
                           ) : '-'}
                         </TableCell>
                         <TableCell>

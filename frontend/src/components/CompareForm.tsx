@@ -26,6 +26,8 @@ interface Props {
   loading: boolean
   onSubmit: (items: CompareItem[], resample?: string, apply?: string) => void
   prefill?: ComparePrefill | null
+  /** How many series can be picked (Correlation takes exactly two). */
+  maxSeries?: number
 }
 
 interface Slot {
@@ -50,7 +52,7 @@ function decomposeQuery(query: string, formFields: FormField[]): Record<string, 
   return values
 }
 
-export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
+export function CompareForm({ sources, loading, onSubmit, prefill, maxSeries = 3 }: Props) {
   const [slots, setSlots] = useState<Slot[]>([emptySlot(), emptySlot()])
   const [resample, setResample] = useState('')
   const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
@@ -93,7 +95,7 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
   }
 
   const addSlot = () => {
-    if (slots.length < 3) setSlots((prev) => [...prev, emptySlot()])
+    if (slots.length < maxSeries) setSlots((prev) => [...prev, emptySlot()])
   }
 
   const removeSlot = (index: number) => {
@@ -167,11 +169,12 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
     return src.form_fields.every((f) => slot.fieldValues[f.name]?.trim())
   }
 
-  const canSubmit = slots.filter(isSlotComplete).length >= 2
+  const canSubmit = slots.slice(0, maxSeries).filter(isSlotComplete).length >= 2
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const items: CompareItem[] = slots
+      .slice(0, maxSeries)
       .filter(isSlotComplete)
       .map((slot) => ({ source: slot.source, query: buildQuery(slot) }))
     if (items.length >= 2) onSubmit(items, resample || undefined)
@@ -249,7 +252,7 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
     <Card sx={{ mb: 3 }}>
       <CardContent>
         <form onSubmit={handleSubmit}>
-          {slots.map((slot, index) => {
+          {slots.slice(0, maxSeries).map((slot, index) => {
             const src = sources.find((s) => s.name === slot.source)
             const formFields = src?.form_fields || []
             return (
@@ -296,7 +299,7 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
           })}
 
           <Box sx={{ display: 'flex', gap: 1.5, mt: 2, alignItems: 'center' }}>
-            {slots.length < 3 && (
+            {slots.length < maxSeries && (
               <Button size="small" startIcon={<AddIcon />} onClick={addSlot}>
                 Add series
               </Button>

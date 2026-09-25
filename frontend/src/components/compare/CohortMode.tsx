@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import Autocomplete from '@mui/material/Autocomplete'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -24,9 +24,10 @@ import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
 import type { Chart as ChartJS } from 'chart.js'
-import type { CohortResponse, DataSourceInfo, LookupItem } from '../api/types'
-import { ApiError, fetchCohort, fetchLookup } from '../api/client'
-import { ErrorAlert } from './ErrorAlert'
+import type { CohortResponse, DataSourceInfo, LookupItem } from '../../api/types'
+import { ApiError, fetchCohort, fetchLookup } from '../../api/client'
+import { ErrorAlert } from '../ErrorAlert'
+import { compactTick, formatPrecise } from '../../utils/format'
 
 const COLORS = [
   '#3b82f6', '#f97316', '#10b981', '#ef4444', '#8b5cf6',
@@ -35,13 +36,28 @@ const COLORS = [
   '#2dd4bf', '#e879f9', '#4ade80', '#f87171', '#38bdf8',
 ]
 
-interface Props {
-  sources: DataSourceInfo[]
+export interface CohortPrefill {
+  source: string
+  queries: string[]
+  /** Run straight away (deep link). */
+  run?: boolean
 }
 
-export function CohortPanel({ sources }: Props) {
-  const [source, setSource] = useState('')
-  const [queriesText, setQueriesText] = useState('')
+interface Props {
+  sources: DataSourceInfo[]
+  /** Initial source/queries (from the URL or the series loaded in Overlay). */
+  prefill?: CohortPrefill | null
+  /** Called with what was compared, so the URL can describe it. */
+  onRun?: (source: string, queries: string[]) => void
+}
+
+/**
+ * Cohort mode of Compare: many series from one source, rebased and ranked
+ * by return, drawdown and volatility. Remount (key) to apply a new prefill.
+ */
+export function CohortMode({ sources, prefill, onRun }: Props) {
+  const [source, setSource] = useState(prefill?.source ?? '')
+  const [queriesText, setQueriesText] = useState((prefill?.queries ?? []).join(', '))
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [normalize, setNormalize] = useState(true)
@@ -87,6 +103,7 @@ export function CohortPanel({ sources }: Props) {
   const handleSubmit = async () => {
     const queries = parseQueries()
     if (!source || queries.length < 2) return
+    onRun?.(source, queries)
 
     setLoading(true)
     setError(null)
@@ -107,6 +124,15 @@ export function CohortPanel({ sources }: Props) {
       setLoading(false)
     }
   }
+
+  // Autocomplete sources need their lookup list; deep links run at once
+  const onMount = useEffectEvent(() => {
+    if (prefill?.source) void loadLookup(prefill.source)
+    if (prefill?.run) void handleSubmit()
+  })
+  useEffect(() => {
+    onMount()
+  }, [])
 
   const handleResetZoom = () => {
     chartRef.current?.resetZoom()
@@ -130,12 +156,6 @@ export function CohortPanel({ sources }: Props) {
     <Box>
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="subtitle1" gutterBottom>
-            Cohort Comparison
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Compare multiple series from the same source, normalized and ranked by performance
-          </Typography>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <FormControl size="small" sx={{ minWidth: 150 }}>
@@ -245,7 +265,7 @@ export function CohortPanel({ sources }: Props) {
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                   <Typography variant="subtitle2">
-                    {normalize ? 'Normalized Performance (% change from day 1)' : 'Raw Values'}
+                    {normalize ? 'Performance (% change from day 1)' : 'Raw values'}
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <Button
@@ -268,7 +288,7 @@ export function CohortPanel({ sources }: Props) {
                     </Button>
                   </Box>
                 </Box>
-                <Box sx={{ height: 400 }}>
+                <Box sx={{ height: { xs: 280, sm: 400 } }}>
                   <Line
                     ref={chartRef}
                     data={{
@@ -299,9 +319,16 @@ export function CohortPanel({ sources }: Props) {
                             display: true,
                             text: normalize ? '% Change' : 'Value',
                           },
+                          ticks: { callback: normalize ? (v: number | string) => `${v}%` : compactTick },
                         },
                       },
                       plugins: {
+                        tooltip: {
+                          callbacks: {
+                            label: (ctx: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+                              `${ctx.dataset.label}: ${normalize && ctx.parsed.y != null ? `${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(1)}%` : formatPrecise(ctx.parsed.y)}`,
+                          },
+                        },
                         zoom: {
                           zoom: {
                             drag: { enabled: true },
@@ -367,13 +394,13 @@ export function CohortPanel({ sources }: Props) {
                               fontWeight: 600,
                             }}
                           >
-                            {m.total_return >= 0 ? '+' : ''}{m.total_return.toFixed(2)}%
+                            {m.total_return >= 0 ? '+' : ''}{m.total_return.toFixed(1)}%
                           </TableCell>
                           <TableCell
                             align="right"
                             sx={{ color: 'error.main' }}
                           >
-                            {m.max_drawdown.toFixed(2)}%
+                            {m.max_drawdown.toFixed(1)}%
                           </TableCell>
                           <TableCell align="right">
                             {m.volatility.toFixed(2)}

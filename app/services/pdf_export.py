@@ -157,7 +157,7 @@ def generate_pdf_report(
         ["Aspect", "Result"],
         ["Direction", analysis.trend.direction.title()],
         ["Momentum", analysis.trend.momentum_label],
-        ["Acceleration", f"{analysis.trend.acceleration:.4f}"],
+        ["Pace", analysis.trend.acceleration_label or "steady"],
         [
             "Seasonality",
             f"Yes ({analysis.seasonality.period_days} days)"

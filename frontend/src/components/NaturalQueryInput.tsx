@@ -15,6 +15,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import { addToWatchlist, parseNaturalQuery } from '../api/client'
 import { isAlertResult, isCompareResult } from '../api/types'
 import type { NaturalAlertResponse, NaturalCompareItem } from '../api/types'
+import { formatPrecise } from '../utils/format'
 
 const EXAMPLE_QUERIES = [
   // Sports - MLS teams with season resampling
@@ -283,7 +284,7 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
           </Typography>
           <Typography variant="body2">
             Source: {alertResult.source} &middot; Query: {alertResult.query} &middot;{' '}
-            Trigger: {alertResult.threshold_direction} {alertResult.threshold_value.toLocaleString()}
+            Trigger: {alertResult.threshold_direction} {formatPrecise(alertResult.threshold_value)}
           </Typography>
         </Alert>
       )}

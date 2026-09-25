@@ -18,10 +18,56 @@ logger = get_logger(__name__)
 class RateLimitConfig:
     """Configuration for rate limiting."""
 
-    requests_per_minute: int = 60
-    requests_per_hour: int = 1000
-    burst_size: int = 10  # Max requests allowed in quick succession
+    # One page load fans out to ~10 API calls (sources, views, series,
+    # analyze, forecast, watchlist, ...), so the burst must cover a few quick
+    # reloads; the sustained rate refills 2 tokens a second.
+    requests_per_minute: int = 120
+    requests_per_hour: int = 3000
+    burst_size: int = 40  # Max requests allowed in quick succession
     enabled: bool = True
+
+
+# AI endpoints call a paid LLM, so they get their own, much tighter bucket on
+# top of the general one (the old general limits, which were sized for them).
+AI_RATE_LIMIT_DEFAULTS = RateLimitConfig(
+    requests_per_minute=20,
+    requests_per_hour=200,
+    burst_size=10,
+)
+
+# Paths (after the /api or /api/v1 prefix) that call the LLM
+AI_PATHS = (
+    "/insight",
+    "/insight-followup",
+    "/insights-feed",
+    "/natural-query",
+    "/compare-insight",
+    "/compare-insight-followup",
+    "/event-context",
+)
+
+# Cheap GET metadata endpoints (DB reads, no upstream fetch or LLM) that are
+# never rate limited
+EXEMPT_GET_PATHS = (
+    "/auth-status",
+    "/sources",
+    "/views",
+    "/uploads",
+    "/watchlist",
+    "/notifications/config",
+    "/notifications/status",
+)
+EXEMPT_GET_PREFIXES = ("/views/",)
+
+
+def api_subpath(path: str) -> str | None:
+    """``/api/v1/foo`` or ``/api/foo`` -> ``/foo``; None if not an API path."""
+    for prefix in ("/api/v1", "/api"):
+        if path == prefix:
+            return "/"
+        if path.startswith(prefix + "/"):
+            return path[len(prefix) :]
+    return None
 
 
 @dataclass
@@ -133,9 +179,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     SKIP_PATHS = {"/health", "/", "/docs", "/redoc", "/openapi.json"}
     SKIP_PREFIXES = ("/assets/", "/static/")
 
-    def __init__(self, app: Any, config: RateLimitConfig | None = None):
+    def __init__(
+        self,
+        app: Any,
+        config: RateLimitConfig | None = None,
+        ai_config: RateLimitConfig | None = None,
+    ):
         super().__init__(app)
         self.limiter = RateLimiter(config)
+        ai = ai_config or RateLimitConfig(
+            requests_per_minute=AI_RATE_LIMIT_DEFAULTS.requests_per_minute,
+            requests_per_hour=AI_RATE_LIMIT_DEFAULTS.requests_per_hour,
+            burst_size=AI_RATE_LIMIT_DEFAULTS.burst_size,
+            enabled=self.limiter.config.enabled,
+        )
+        self.ai_limiter = RateLimiter(ai)
+
+    @staticmethod
+    def is_exempt(method: str, sub: str) -> bool:
+        """Cheap metadata reads that are never limited."""
+        if method not in ("GET", "HEAD"):
+            return False
+        return sub in EXEMPT_GET_PATHS or sub.startswith(EXEMPT_GET_PREFIXES)
+
+    @staticmethod
+    def is_ai(sub: str) -> bool:
+        return sub in AI_PATHS
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Any]
@@ -147,15 +216,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Only rate limit API endpoints
-        if not path.startswith("/api"):
+        sub = api_subpath(path)
+        if sub is None or self.is_exempt(request.method, sub):
             return await call_next(request)
 
-        allowed, info = self.limiter.check(request)
+        allowed, info = True, {}
+        if self.is_ai(sub):
+            allowed, info = self.ai_limiter.check(request)
+            if not allowed:
+                info["bucket"] = "ai"
+        if allowed:
+            allowed, info = self.limiter.check(request)
 
         if not allowed:
             logger.with_fields(
                 client=info.get("client"),
                 reason=info.get("reason"),
+                bucket=info.get("bucket", "general"),
                 path=path,
             ).warning("Rate limit exceeded")
 

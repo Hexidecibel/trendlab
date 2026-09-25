@@ -44,10 +44,26 @@ async def analyze_causal_impact(
     pre_x = np.array([(p.date - origin).days for p in pre_points], dtype=float)
     pre_y = np.array([p.value for p in pre_points], dtype=float)
 
-    # Fit polynomial (degree 2 for flexibility, clamp to 1 if too few points)
-    degree = min(2, max(1, len(pre_points) - 1))
-    coeffs = np.polyfit(pre_x, pre_y, degree)
-    poly = np.poly1d(coeffs)
+    # Linear trend by default. A quadratic only when it fits the pre-period
+    # clearly better (AIC) and isn't extrapolated further than the data it
+    # was fitted on -- a curve projected far ahead quickly runs off (e.g. a
+    # counterfactual below zero for page views), which makes the "impact"
+    # meaningless.
+    poly = np.poly1d(np.polyfit(pre_x, pre_y, 1))
+    post_span = float((post_points[-1].date - origin).days) - float(pre_x[-1])
+    pre_span = float(pre_x[-1] - pre_x[0])
+    if len(pre_points) >= 3 and post_span <= pre_span:
+        quad = np.poly1d(np.polyfit(pre_x, pre_y, 2))
+        n = len(pre_points)
+
+        def aic(f: np.poly1d, k: int) -> float:
+            rss = float(np.sum((pre_y - f(pre_x)) ** 2))
+            return n * math.log(max(rss / n, 1e-300)) + 2 * k
+
+        if aic(quad, 3) < aic(poly, 2) - 2.0:
+            poly = quad
+    # Counts, prices, views... can't go below zero
+    floor_zero = bool(np.all(pre_y >= 0))
 
     # Residual standard deviation for confidence intervals
     pre_residuals = pre_y - poly(pre_x)
@@ -63,6 +79,8 @@ async def analyze_causal_impact(
     for p in post_points:
         x = float((p.date - origin).days)
         predicted = float(poly(x))
+        if floor_zero:
+            predicted = max(predicted, 0.0)
         # Widen CI with distance from training data
         dist_factor = 1.0 + 0.01 * max(0, x - float(pre_x[-1]))
         ci_half = 1.96 * residual_std * dist_factor

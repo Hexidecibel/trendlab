@@ -148,3 +148,60 @@ class TestResidualMethod:
         )
         result = analyze_anomalies(ts, method="residual", seasonal_period=7)
         assert [a.date for a in result.anomalies] == [ts.points[90].date]
+
+
+def _weekly_step_series(spike_at: int | None = None) -> TimeSeries:
+    """180 days with a weekend dip, noise, and a 40% level drop at day 150."""
+    import datetime
+
+    import numpy as np
+
+    from app.models.schemas import DataPoint
+
+    rng = np.random.default_rng(7)
+    n = 180
+    t = np.arange(n)
+    level = np.where(t < 150, 60e6, 36e6)
+    values = level * np.where(t % 7 >= 5, 0.7, 1.0) * (1 + rng.normal(0, 0.02, n))
+    if spike_at is not None:
+        values[spike_at] *= 1.8
+    start = datetime.date(2026, 3, 28)
+    return TimeSeries(
+        source="test",
+        query="step",
+        points=[
+            DataPoint(date=start + datetime.timedelta(days=int(i)), value=float(v))
+            for i, v in zip(t, values)
+        ],
+    )
+
+
+class TestAnomaliesAroundLevelShifts:
+    """A step change is a structural break, not a run of anomalies."""
+
+    def test_clean_step_has_no_anomalies(self):
+        from app.analysis.engine import analyze
+
+        result = analyze(_weekly_step_series())
+        # The step itself is detected as a break...
+        step = [b for b in result.structural_breaks if abs(b.index - 150) <= 3]
+        assert step
+        # pinned onto the step itself and described in plain words
+        assert step[0].index == 150
+        assert step[0].label == "big drop"
+        assert step[0].change_pct < -30
+        # ...and not flagged point by point where the smooth line lags it
+        assert result.anomalies.anomaly_count == 0
+
+    def test_spike_elsewhere_is_still_caught(self):
+        from app.analysis.engine import analyze
+
+        ts = _weekly_step_series(spike_at=60)
+        result = analyze(ts)
+        assert [a.date for a in result.anomalies.anomalies] == [ts.points[60].date]
+
+    def test_single_trend_fit_would_flag_the_step(self):
+        """Guard: without breaks the old single fit does flag the step."""
+        ts = _weekly_step_series()
+        result = analyze_anomalies(ts, method="residual", seasonal_period=7)
+        assert result.anomaly_count > 0

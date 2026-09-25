@@ -10,6 +10,7 @@ import TableRow from '@mui/material/TableRow'
 import TableSortLabel from '@mui/material/TableSortLabel'
 import Typography from '@mui/material/Typography'
 import type { ModelEvaluation } from '../api/types'
+import { formatPrecise } from '../utils/format'
 
 interface Props {
   evaluations: ModelEvaluation[]
@@ -112,8 +113,8 @@ export function EvaluationTable({ evaluations, recommended }: Props) {
                       </Typography>
                     )}
                   </TableCell>
-                  <TableCell align="right">{ev.mae.toFixed(2)}</TableCell>
-                  <TableCell align="right">{ev.rmse.toFixed(2)}</TableCell>
+                  <TableCell align="right">{formatPrecise(ev.mae)}</TableCell>
+                  <TableCell align="right">{formatPrecise(ev.rmse)}</TableCell>
                   <TableCell align="right">{ev.mape.toFixed(1)}</TableCell>
                   <TableCell align="right">{ev.train_size}</TableCell>
                   <TableCell align="right">{ev.test_size}</TableCell>

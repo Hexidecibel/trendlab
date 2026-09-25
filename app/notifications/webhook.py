@@ -12,13 +12,16 @@ logger = get_logger(__name__)
 
 def _format_alert_line(alert: WatchlistItemResponse) -> str:
     """Format a single alert into a human-readable line."""
-    direction = alert.threshold_direction or "threshold"
-    value = alert.last_value if alert.last_value is not None else "?"
-    threshold = alert.threshold_value if alert.threshold_value is not None else "?"
-    return (
-        f"- {alert.name} ({alert.source}/{alert.query}): "
-        f"{value} is {direction} {threshold}"
-    )
+    if alert.alert_message:
+        what = alert.alert_message
+    else:  # threshold alert built without a message (e.g. the test ping)
+        direction = alert.threshold_direction or "threshold"
+        value = alert.last_value if alert.last_value is not None else "?"
+        threshold = (
+            alert.threshold_value if alert.threshold_value is not None else "?"
+        )
+        what = f"{value} is {direction} {threshold}"
+    return f"- {alert.name} ({alert.source}/{alert.query}): {what}"
 
 
 def _build_payload(
@@ -30,7 +33,7 @@ def _build_payload(
     count = len(alerts)
     text = (
         f"\U0001f514 TrendLab Alert: {count} "
-        f"threshold{'s' if count != 1 else ''} triggered\n"
+        f"alert{'s' if count != 1 else ''} triggered\n"
         + "\n".join(lines)
     )
 
@@ -45,9 +48,13 @@ def _build_payload(
                     "name": a.name,
                     "source": a.source,
                     "query": a.query,
+                    "alert_type": a.alert_type or "threshold",
+                    "message": a.alert_message,
                     "last_value": a.last_value,
                     "threshold_direction": a.threshold_direction,
                     "threshold_value": a.threshold_value,
+                    "slope_threshold": a.slope_threshold,
+                    "slope_pct_per_month": a.last_slope,
                     "trend_direction": a.trend_direction,
                 }
                 for a in alerts

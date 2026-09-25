@@ -6,9 +6,7 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
-import CircularProgress from '@mui/material/CircularProgress'
 import Collapse from '@mui/material/Collapse'
-import Divider from '@mui/material/Divider'
 import Grid from '@mui/material/Grid'
 import LinearProgress from '@mui/material/LinearProgress'
 import Tab from '@mui/material/Tab'
@@ -18,28 +16,27 @@ import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useApi } from '../hooks/useApi'
 import { useWebSocket } from '../hooks/useWebSocket'
-import { ApiError, fetchCompare, fetchCorrelate, fetchView } from '../api/client'
-import type { CompareItem, CorrelateResponse, NaturalCompareItem, TimeSeries, TrendAnalysis } from '../api/types'
+import { fetchView } from '../api/client'
+import type { NaturalCompareItem } from '../api/types'
 import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
 import type { QueryPrefill } from './QueryForm'
-import { CompareForm } from './CompareForm'
-import type { ComparePrefill } from './CompareForm'
 import { ForecastChart } from './charts/ForecastChart'
-import { CompareChart } from './charts/CompareChart'
 import { ModelSelector } from './ModelSelector'
 import { AnalysisPanel } from './AnalysisPanel'
 import { EvaluationTable } from './EvaluationTable'
 import { InsightPanel } from './InsightPanel'
-import { CompareInsightPanel } from './CompareInsightPanel'
-import { CausalImpactPanel } from './CausalImpactPanel'
-import { CohortPanel } from './CohortPanel'
-import { CorrelateTab } from './CorrelateTab'
+import { ChangeImpactPopover } from './ChangeImpactPopover'
+import type { ImpactRequest } from './ChangeImpactPopover'
+import { CompareView } from './compare/CompareView'
+import type { CompareRequest } from './compare/CompareView'
 import { SaveViewButton } from './SaveViewButton'
 import { ViewsDropdown } from './ViewsDropdown'
 import { ExportPdfButton } from './ExportPdfButton'
 import { ForecastAccuracyPanel } from './ForecastAccuracyPanel'
-import { WatchlistPanel } from './WatchlistPanel'
+import { WatchButton } from './watchlist/WatchButton'
+import { WatchlistDrawer } from './watchlist/WatchlistDrawer'
+import { useWatchlist } from './watchlist/watchlistContext'
 import { ProgressBar } from './ProgressBar'
 import { ErrorAlert } from './ErrorAlert'
 import { RecentAndSavedViews } from './RecentAndSavedViews'
@@ -49,30 +46,8 @@ import type { RecentQuery } from '../recentQueries'
 import { preferredSmoothing, storeSmoothing } from '../smoothing'
 import type { SmoothingPreset } from '../smoothing'
 import { parseUrlState, replaceUrlState } from '../urlState'
-import type { CompareMode, UrlState } from '../urlState'
-
-// Generate a friendly label from series metadata or query
-function getFriendlyLabel(s: TimeSeries): string {
-  const meta = s.metadata || {}
-
-  // Try to build from metadata
-  if (meta.article) return `${meta.article} (Wikipedia)`
-  if (meta.package) return `${meta.package} (${s.source === 'npm' ? 'npm' : 'PyPI'})`
-  if (meta.coin) return `${meta.coin} (Crypto)`
-  if (meta.symbol) return `${meta.symbol} (${meta.metric || 'Stock'})`
-  if (meta.team) return `${meta.team} (${meta.metric_label || 'xG'})`
-  if (meta.player) return `${meta.player} (${meta.metric_label || 'xG'})`
-  if (meta.location) return `${meta.location} (${meta.metric_label || 'Weather'})`
-
-  // Fallback: simplify query
-  const query = s.query
-  if (query.includes(':')) {
-    const parts = query.split(':')
-    return parts[1] || parts[0] || query
-  }
-
-  return `${s.source}: ${query}`
-}
+import type { CompareUrlState, UrlState } from '../urlState'
+import { getFriendlyLabel } from '../utils/labels'
 
 export function Dashboard() {
   const { sources, series, analysis, forecast, loading, error, loadData, requestId } =
@@ -85,21 +60,33 @@ export function Dashboard() {
   const [editOpen, setEditOpen] = useState(false)
   const [recent, setRecent] = useState<RecentQuery[]>(() => loadRecentQueries())
 
-  const [activeTab, setActiveTab] = useState<'forecast' | 'compare' | 'correlate'>('forecast')
-  const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
-  const [compareAnalyses, setCompareAnalyses] = useState<TrendAnalysis[] | null>(null)
-  const [compareResample, setCompareResample] = useState('')
-  const [compareApply, setCompareApply] = useState('')
-  const [compareItems, setCompareItems] = useState<CompareItem[]>([])
-  const [compareLoading, setCompareLoading] = useState(false)
-  const [compareError, setCompareError] = useState<string | ApiError | null>(null)
   const [queryPrefill, setQueryPrefill] = useState<QueryPrefill | null>(null)
-  const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
   const [lastApply, setLastApply] = useState('')
 
   // URL state read once on load (share links, bookmarks, reloads)
   const [initialUrl] = useState<UrlState | null>(() => parseUrlState(window.location.search))
   const initialUrlHandled = useRef(false)
+
+  const [activeTab, setActiveTab] = useState<'forecast' | 'compare'>(() =>
+    initialUrl?.kind === 'compare' ? 'compare' : 'forecast',
+  )
+  // Compare owns its own state; a new request (URL / plain-English box)
+  // remounts it via the id key.
+  const [compareRequest, setCompareRequest] = useState<(CompareRequest & { id: number }) | null>(() =>
+    initialUrl?.kind === 'compare'
+      ? {
+          id: 1,
+          items: initialUrl.items,
+          resample: initialUrl.resample,
+          tool: initialUrl.tool,
+          smooth: initialUrl.smooth,
+          mode: initialUrl.mode,
+        }
+      : null,
+  )
+  const [compareUrl, setCompareUrl] = useState<CompareUrlState | null>(null)
+  const [impact, setImpact] = useState<ImpactRequest | null>(null)
+  const watchlist = useWatchlist()
 
   // Smoothing: an explicit choice applies to the source it was made for;
   // otherwise the user's remembered choice or the source default is used.
@@ -110,17 +97,9 @@ export function Dashboard() {
         : null,
   )
   const [urlError, setUrlError] = useState<string | null>(null)
-  const [compareSmoothingChoice, setCompareSmoothingChoice] = useState<SmoothingPreset | null>(
-    () => (initialUrl?.kind === 'compare' && initialUrl.smooth) || null,
-  )
-  const [compareMode, setCompareMode] = useState<CompareMode>(
-    () => (initialUrl?.kind === 'compare' && initialUrl.mode) || 'index',
-  )
-  const [compareCorrelation, setCompareCorrelation] = useState<CorrelateResponse | null>(null)
-  const compareRunRef = useRef(0)
-
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => {
     setActiveTab('forecast')
+    setImpact(null)
     // Anomaly method is left to the backend default (trend-residual scoring).
     // The query/range describing the chart only change once the new data is
     // in: until then the previous chart stays up (dimmed) as it was.
@@ -189,56 +168,34 @@ export function Dashboard() {
     if (source === 'csv') setEditOpen(true)
   }
 
-  const handleCompare = async (items: CompareItem[], resample?: string, apply?: string) => {
-    const run = ++compareRunRef.current
-    setCompareLoading(true)
-    setCompareError(null)
-    setCompareSeries(null)
-    setCompareAnalyses(null)
-    setCompareCorrelation(null)
-    setCompareResample(resample || '')
-    setCompareApply(apply || '')
-    setCompareItems(items)
-    // Correlation stat for two-series compares; best effort, never blocks
-    if (items.length === 2) {
-      fetchCorrelate({ series_a: items[0], series_b: items[1], resample: resample || undefined })
-        .then((c) => {
-          if (compareRunRef.current === run) setCompareCorrelation(c)
-        })
-        .catch(() => {})
-    }
-    try {
-      const result = await fetchCompare(items, resample, apply)
-      if (compareRunRef.current !== run) return
-      setCompareSeries(result.series)
-      setCompareAnalyses(result.analyses ?? null)
-    } catch (err) {
-      if (compareRunRef.current !== run) return
-      setCompareError(err instanceof ApiError ? err : err instanceof Error ? err.message : String(err))
-    } finally {
-      if (compareRunRef.current === run) setCompareLoading(false)
-    }
-  }
-
   const handleNlCompare = (
     items: NaturalCompareItem[],
     _interpretation: string,
     resample?: string,
   ) => {
     setActiveTab('compare')
-    setComparePrefill({
-      items: items.map((i) => ({ source: i.source, query: i.query })),
+    setCompareRequest((prev) => ({
+      id: (prev?.id ?? 0) + 1,
+      tool: 'overlay',
       resample,
-    })
-    const compareItems: CompareItem[] = items.map((i) => ({
-      source: i.source,
-      query: i.query,
-      start: i.start ?? undefined,
-      end: i.end ?? undefined,
+      items: items.map((i) => ({
+        source: i.source,
+        query: i.query,
+        start: i.start ?? undefined,
+        end: i.end ?? undefined,
+      })),
     }))
-    // Wait for next tick to ensure state updates are flushed before API call
-    setTimeout(() => handleCompare(compareItems, resample), 0)
   }
+
+  // Opening a watched query from the watchlist drawer
+  const openWatched = useEffectEvent((source: string, query: string, resample?: string | null) => {
+    loadWithPrefill(source, query, 14, undefined, undefined, resample ?? undefined)
+  })
+  const { setOpenQueryHandler } = watchlist
+  useEffect(() => {
+    setOpenQueryHandler((item) => openWatched(item.source, item.query, item.resample))
+    return () => setOpenQueryHandler(null)
+  }, [setOpenQueryHandler])
 
   // Restore the view encoded in the URL once, on first load
   const restoreFromUrl = useEffectEvent(() => {
@@ -254,11 +211,8 @@ export function Dashboard() {
         })
     } else if (u.kind === 'forecast') {
       loadWithPrefill(u.source, u.query, u.horizon, u.start, u.end, u.resample, u.apply)
-    } else {
-      setActiveTab('compare')
-      setComparePrefill({ items: u.items, resample: u.resample })
-      handleCompare(u.items, u.resample)
     }
+    // Compare links are applied by CompareView's initial request
   })
   useEffect(() => {
     if (initialUrlHandled.current) return
@@ -276,26 +230,10 @@ export function Dashboard() {
     storeSmoothing(lastQuery.source, preset)
   }
 
-  // Compare: Medium when every series is count-like, else Raw (or the choice)
-  const compareSources = compareItems.map((i) => i.source)
-  const compareSmoothing: SmoothingPreset =
-    compareSmoothingChoice ??
-    (compareSources.length > 0 && compareSources.every((src) => preferredSmoothing(src, sources) !== 'raw')
-      ? 'medium'
-      : 'raw')
-
   // Keep the URL in sync with what's on screen (replaceState, no history spam)
   const urlState: UrlState | null =
     activeTab === 'compare'
-      ? compareItems.length >= 2
-        ? {
-            kind: 'compare',
-            items: compareItems.map((i) => ({ source: i.source, query: i.query })),
-            resample: compareResample || undefined,
-            smooth: compareSmoothing,
-            mode: compareMode,
-          }
-        : null
+      ? compareUrl
       : activeTab === 'forecast' && lastQuery.source && lastQuery.query
         ? {
             kind: 'forecast',
@@ -328,7 +266,7 @@ export function Dashboard() {
   return (
     <Box>
       <NaturalQueryInput
-        loading={loading || compareLoading}
+        loading={loading}
         onResult={handleNlExplore}
         onCompareResult={handleNlCompare}
       />
@@ -356,7 +294,6 @@ export function Dashboard() {
         >
           <Tab value="forecast" label="Forecast" />
           <Tab value="compare" label="Compare" />
-          <Tab value="correlate" label="Correlate" />
         </Tabs>
         <Box sx={{ pb: 1, flexShrink: 0 }}>
           <ViewsDropdown onLoadView={handleLoadView} />
@@ -432,7 +369,15 @@ export function Dashboard() {
                   resample={lastQuery.resample}
                   smoothing={smoothing}
                   onSmoothingChange={handleSmoothingChange}
+                  onDateClick={setImpact}
                   actions={
+                    <>
+                    <WatchButton
+                      source={lastQuery.source}
+                      query={lastQuery.query}
+                      resample={lastQuery.resample || undefined}
+                      name={getFriendlyLabel(series)}
+                    />
                     <SaveViewButton
                       iconOnly
                       smoothing={smoothing}
@@ -444,18 +389,19 @@ export function Dashboard() {
                       resample={lastQuery.resample || undefined}
                       apply={lastApply || undefined}
                     />
+                    </>
                   }
                 />
-                {lastQuery.source && lastQuery.query && (
-                  <CausalImpactPanel
-                    source={lastQuery.source}
-                    query={lastQuery.query}
-                    start={lastRange.start}
-                    end={lastRange.end}
-                    resample={lastQuery.resample || undefined}
-                    apply={lastApply || undefined}
-                  />
-                )}
+                <ChangeImpactPopover
+                  request={impact}
+                  onClose={() => setImpact(null)}
+                  source={lastQuery.source}
+                  query={lastQuery.query}
+                  start={lastRange.start}
+                  end={lastRange.end}
+                  resample={lastQuery.resample || undefined}
+                  apply={lastApply || undefined}
+                />
                 <Accordion
                   disableGutters
                   sx={{ mt: 2, borderRadius: 3, '&:before': { display: 'none' } }}
@@ -503,7 +449,7 @@ export function Dashboard() {
               </Grid>
 
               <Grid size={{ xs: 12, lg: 4 }}>
-                <AnalysisPanel analysis={analysis} />
+                <AnalysisPanel analysis={analysis} onBreakClick={setImpact} />
                 {lastQuery.source && lastQuery.query && (
                   <Box sx={{ mt: 3 }}>
                     <InsightPanel
@@ -525,118 +471,27 @@ export function Dashboard() {
           )}
 
           {!hasData && !loading && (
-            <Grid container spacing={3}>
-              <Grid size={{ xs: 12, md: 8 }}>
-                <RecentAndSavedViews
-                  recent={recent}
-                  onLoadRecent={handleLoadRecent}
-                  onLoadView={handleLoadView}
-                  onClearRecent={handleClearRecent}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <WatchlistPanel
-                  sources={sources}
-                  onLoadQuery={(source, query) => handleSubmit(source, query, 14)}
-                />
-              </Grid>
-            </Grid>
+            <RecentAndSavedViews
+              recent={recent}
+              onLoadRecent={handleLoadRecent}
+              onLoadView={handleLoadView}
+              onClearRecent={handleClearRecent}
+            />
           )}
         </>
       )}
 
-      {activeTab === 'compare' && (
-        <>
-          <CompareForm
-            sources={sources}
-            loading={compareLoading}
-            onSubmit={handleCompare}
-            prefill={comparePrefill}
-          />
+      {/* Kept mounted so a compare survives switching tabs */}
+      <Box hidden={activeTab !== 'compare'}>
+        <CompareView
+          key={compareRequest?.id ?? 0}
+          sources={sources}
+          request={compareRequest}
+          onUrlState={setCompareUrl}
+        />
+      </Box>
 
-          {compareError && <ErrorAlert error={compareError} />}
-
-          {compareLoading && (
-            <Box sx={{ textAlign: 'center', py: 6 }}>
-              <CircularProgress size={32} />
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                Fetching comparison data...
-              </Typography>
-            </Box>
-          )}
-
-          {compareSeries && !compareLoading && (
-            <>
-              <Grid container spacing={3}>
-                <Grid size={{ xs: 12, lg: compareAnalyses ? 8 : 12 }}>
-                  <CompareChart
-                    seriesList={compareSeries}
-                    analyses={compareAnalyses}
-                    resample={compareResample}
-                    smoothing={compareSmoothing}
-                    onSmoothingChange={setCompareSmoothingChoice}
-                    mode={compareMode}
-                    onModeChange={setCompareMode}
-                    correlation={compareCorrelation}
-                  />
-                </Grid>
-                {compareAnalyses && (
-                  <Grid size={{ xs: 12, lg: 4 }}>
-                    {compareAnalyses.map((a, i) => (
-                      <Box key={i} sx={{ mb: 2 }}>
-                        <Typography
-                          variant="subtitle2"
-                          sx={{
-                            mb: 1,
-                            color: ['#3b82f6', '#f97316', '#10b981'][i],
-                            fontWeight: 600,
-                          }}
-                        >
-                          {getFriendlyLabel(compareSeries[i])}
-                        </Typography>
-                        <AnalysisPanel analysis={a} compact />
-                      </Box>
-                    ))}
-                  </Grid>
-                )}
-              </Grid>
-              {compareItems.length >= 2 && (
-                <CompareInsightPanel
-                  items={compareItems}
-                  resample={compareResample}
-                  apply={compareApply}
-                  seriesList={compareSeries ?? undefined}
-                  analyses={compareAnalyses ?? undefined}
-                />
-              )}
-            </>
-          )}
-
-          {!compareSeries && !compareLoading && !compareError && (
-            <Box sx={{ textAlign: 'center', py: 8 }}>
-              <Typography variant="body1" color="text.secondary" gutterBottom>
-                Pick 2-3 series to compare side by side
-              </Typography>
-              <Typography variant="body2" color="text.disabled">
-                Or try "compare fastapi and django" in the search bar above
-              </Typography>
-            </Box>
-          )}
-
-          <Divider sx={{ my: 3 }}>
-            <Typography variant="caption" color="text.secondary">
-              Cohort Analysis
-            </Typography>
-          </Divider>
-
-          <CohortPanel sources={sources} />
-        </>
-      )}
-
-      {activeTab === 'correlate' && (
-        <CorrelateTab sources={sources} />
-      )}
-
+      <WatchlistDrawer sources={sources} />
     </Box>
   )
 }

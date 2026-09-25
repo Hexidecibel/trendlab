@@ -11,6 +11,8 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import { Dashboard } from './components/Dashboard'
 import { LockScreen } from './components/LockScreen'
+import { WatchlistProvider } from './components/watchlist/WatchlistProvider'
+import { WatchlistHeaderButton } from './components/watchlist/WatchlistHeaderButton'
 
 const getTheme = (mode: 'light' | 'dark') =>
   createTheme({
@@ -121,6 +123,7 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <WatchlistProvider>
       <AppBar
         position="static"
         color="default"
@@ -149,6 +152,7 @@ export default function App() {
               AI-powered trend analysis and forecasting
             </Typography>
           </Box>
+          <WatchlistHeaderButton />
           <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
             <IconButton onClick={toggleTheme} color="inherit">
               {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
@@ -159,6 +163,7 @@ export default function App() {
       <Container maxWidth="xl" sx={{ py: 3 }}>
         <Dashboard />
       </Container>
+      </WatchlistProvider>
     </ThemeProvider>
   )
 }

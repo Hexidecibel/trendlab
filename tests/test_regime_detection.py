@@ -129,3 +129,27 @@ class TestRegimeDetection:
         ]
         regimes = detect_regimes(ts, breaks)
         assert len(regimes) == 3
+
+
+class TestRegimeLabelFollowsSlope:
+    def test_small_negative_slope_is_stable_not_rising(self):
+        """Noisy up-steps can average positive while the slope is ~-0.3%/mo."""
+        values = []
+        v = 100.0
+        for i in range(60):
+            # alternate big up / slightly bigger down steps: mean pct return
+            # is positive, but the level drifts down very slowly
+            v = v * 1.3 if i % 2 == 0 else v / 1.3005
+            values.append(v)
+        ts = TimeSeries(
+            source="t",
+            query="q",
+            points=[
+                DataPoint(date=BASE_DATE + datetime.timedelta(days=i), value=x)
+                for i, x in enumerate(values)
+            ],
+        )
+        (regime,) = detect_regimes(ts, [])
+        assert regime.mean_return > 0.01  # the old label would say "rising"
+        assert abs(regime.slope_pct_per_month) < 2.0
+        assert regime.label == "stable"

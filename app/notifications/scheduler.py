@@ -1,5 +1,6 @@
 """Background scheduler that periodically checks the watchlist
-and sends webhook notifications when thresholds are triggered."""
+and sends webhook notifications when alerts (threshold, trend flip,
+slope crossing) are triggered."""
 
 import asyncio
 import datetime

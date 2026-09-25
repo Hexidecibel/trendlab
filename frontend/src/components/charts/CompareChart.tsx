@@ -18,31 +18,10 @@ import { smoothedPoints } from '../../smoothing'
 import type { SmoothingPreset } from '../../smoothing'
 import type { CompareMode } from '../../urlState'
 import { formatLagLong } from '../../utils/lag'
+import { getFriendlyLabel } from '../../utils/labels'
+import { compactTick, formatPrecise } from '../../utils/format'
 
 const COLORS = ['#3b82f6', '#f97316', '#10b981']
-
-// Generate a friendly label from series metadata or query
-function getFriendlyLabel(s: TimeSeries): string {
-  const meta = s.metadata || {}
-
-  // Try to build from metadata
-  if (meta.article) return `${meta.article} (Wikipedia)`
-  if (meta.package) return `${meta.package} (${s.source === 'npm' ? 'npm' : 'PyPI'})`
-  if (meta.coin) return `${meta.coin} (Crypto)`
-  if (meta.symbol) return `${meta.symbol} (${meta.metric || 'Stock'})`
-  if (meta.team) return `${meta.team} (${meta.metric_label || 'xG'})`
-  if (meta.player) return `${meta.player} (${meta.metric_label || 'xG'})`
-  if (meta.location) return `${meta.location} (${meta.metric_label || 'Weather'})`
-
-  // Fallback: simplify query
-  const query = s.query
-  if (query.includes(':')) {
-    const parts = query.split(':')
-    return parts[1] || parts[0] || query
-  }
-
-  return `${s.source}: ${query}`
-}
 
 // Map resample frequency to Chart.js time unit
 type TimeUnit = 'day' | 'week' | 'month' | 'quarter' | 'year'
@@ -246,7 +225,7 @@ export function CompareChart({
     scales: {
       x: {
         type: 'time' as const,
-        time: { unit: getTimeUnit(resample) },
+        time: { unit: getTimeUnit(resample), tooltipFormat: 'MMM d, yyyy' },
         title: { display: true, text: 'Date' },
       },
       y: {
@@ -254,6 +233,7 @@ export function CompareChart({
           display: true,
           text: indexed ? `Index (${baseDate} = 100)` : getYAxisLabel(seriesList),
         },
+        ticks: { callback: compactTick },
       },
     },
     plugins: {
@@ -268,7 +248,7 @@ export function CompareChart({
           label: (ctx: { dataset: { label?: string }; parsed: { y: number | null } }) => {
             const y = ctx.parsed.y
             if (y == null) return ctx.dataset.label ?? ''
-            const v = indexed ? y.toFixed(1) : y.toLocaleString(undefined, { maximumFractionDigits: 2 })
+            const v = indexed ? y.toFixed(1) : formatPrecise(y)
             return `${ctx.dataset.label}: ${v}`
           },
         },

@@ -58,11 +58,6 @@ def compute_momentum(values: np.ndarray) -> np.ndarray:
     return mom
 
 
-def compute_acceleration(values: np.ndarray) -> np.ndarray:
-    """Second differences of the raw values."""
-    return np.diff(values, n=2)
-
-
 def compute_moving_average(
     dates: list, values: np.ndarray, window: int
 ) -> list[DataPoint]:
@@ -231,6 +226,41 @@ def post_break_momentum(
     return pct, f"{rate} since {what} on {format_short_date(dates[idx])}"
 
 
+def trend_acceleration(
+    dates: list[datetime.date],
+    smoothed: np.ndarray,
+    scale_values: np.ndarray | None = None,
+    seasonal_period: int | None = None,
+) -> tuple[float, str | None]:
+    """Change in the medium-smoothed line's slope: recent span vs the one before.
+
+    Returns ``(recent - prior in % per month, label)``. The label is None
+    unless the change is meaningful: at least ``STABLE_PCT_PER_MONTH`` and at
+    least a quarter of the larger slope, with the recent trend not flat.
+    """
+    n = len(smoothed)
+    k = recent_span_points(dates, n, seasonal_period) if n >= 2 else n
+    if n < 2 * k or k < 2:
+        return 0.0, None
+    recent = slope_pct_per_month(dates[-k:], smoothed[-k:], scale_values)
+    prior = slope_pct_per_month(
+        dates[-2 * k : -k], smoothed[-2 * k : -k], scale_values
+    )
+    if recent is None or prior is None:
+        return 0.0, None
+    diff = recent - prior
+    if abs(diff) < STABLE_PCT_PER_MONTH or abs(diff) < 0.25 * max(
+        abs(recent), abs(prior)
+    ):
+        return diff, None
+    kind = classify_direction(recent)
+    if kind == "rising":
+        return diff, "accelerating" if diff > 0 else "growth slowing"
+    if kind == "falling":
+        return diff, "decline speeding up" if diff < 0 else "decline easing"
+    return diff, None
+
+
 def format_momentum_label(pct: float | None) -> str:
     """Human-readable momentum, e.g. "+3.2% / month" or "flat"."""
     if pct is None or abs(pct) < STABLE_PCT_PER_MONTH:
@@ -285,8 +315,6 @@ def analyze_trend(
         )
 
     mom = compute_momentum(values)
-    accel = compute_acceleration(values)
-    avg_acceleration = float(np.mean(accel)) if len(accel) > 0 else 0.0
 
     medium = np.array([p.value for p in smoothed.medium], dtype=np.float64)
     pct = recent_slope_pct(
@@ -295,7 +323,14 @@ def analyze_trend(
     label = format_momentum_label(pct)
     post = post_break_momentum(dates, values, breaks or [], seasonal_period)
     if post is not None:
+        # Momentum comes from after a recent break; the smoothed line bends
+        # through that step, so its slope change says nothing about pace.
         pct, label = post
+        accel, accel_label = 0.0, None
+    else:
+        accel, accel_label = trend_acceleration(
+            dates, medium, scale_values=values, seasonal_period=seasonal_period
+        )
     direction = classify_direction(pct)
     avg_momentum = (pct / 100.0) if pct is not None else 0.0
 
@@ -314,7 +349,8 @@ def analyze_trend(
     return TrendSignal(
         direction=direction,
         momentum=avg_momentum,
-        acceleration=avg_acceleration,
+        acceleration=accel,
+        acceleration_label=accel_label,
         moving_averages=moving_averages,
         momentum_series=momentum_series,
         smoothed=smoothed,

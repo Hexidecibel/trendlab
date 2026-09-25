@@ -12,12 +12,15 @@ import { alpha, useTheme } from '@mui/material/styles'
 import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
-import type { Chart as ChartJS } from 'chart.js'
+import type { ActiveElement, ChartEvent, Chart as ChartJS } from 'chart.js'
 import { fetchEventContext } from '../../api/client'
-import type { EventContext, TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
+import type { DataPoint, EventContext, TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
 import { SmoothingControl } from '../SmoothingControl'
 import { smoothedPoints } from '../../smoothing'
 import type { SmoothingPreset } from '../../smoothing'
+import { compactTick, formatCompact, formatPrecise, formatShortDate } from '../../utils/format'
+import type { ImpactRequest } from '../ChangeImpactPopover'
+import { buildYearLines, spansMoreThanAYear } from './yearOverlay'
 
 // Map resample frequency to Chart.js time unit
 type TimeUnit = 'day' | 'week' | 'month' | 'quarter' | 'year'
@@ -58,6 +61,23 @@ interface Props {
   /** Trend smoothing preset; the control is hidden when the analysis has no smoothed data. */
   smoothing: SmoothingPreset
   onSmoothingChange: (preset: SmoothingPreset) => void
+  /** Plain click on a date (or a break line): ask what changed after it. */
+  onDateClick?: (req: ImpactRequest) => void
+}
+
+// A click that moved further than this (px) since mousedown was a drag-zoom
+const CLICK_SLOP_PX = 5
+// Clicks this close (px) to a break line pick the break's date
+const BREAK_HIT_PX = 8
+
+/** Hover label for a structural break: "Aug 25 · big drop (-39%)". */
+function breakLabel(brk: TrendAnalysis['structural_breaks'][number]): string {
+  const kind = brk.label || 'change'
+  const pct =
+    brk.change_pct != null && Number.isFinite(brk.change_pct) && Math.abs(brk.change_pct) >= 5
+      ? ` (${brk.change_pct > 0 ? '+' : ''}${brk.change_pct.toFixed(0)}%)`
+      : ''
+  return `${formatShortDate(brk.date)} · ${kind}${pct}`
 }
 
 const REGIME_COLORS: Record<string, string> = {
@@ -78,6 +98,7 @@ export function ForecastChart({
   actions,
   smoothing,
   onSmoothingChange,
+  onDateClick,
 }: Props) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -86,6 +107,8 @@ export function ForecastChart({
   const showRegimes = showAnnotations
   const chartRef = useRef<ChartJS<'line', { x: string; y: number }[]>>(null)
   const [eventMap, setEventMap] = useState<Record<string, EventContext>>({})
+  const [compareYears, setCompareYears] = useState(false)
+  const downAt = useRef<{ x: number; y: number } | null>(null)
 
   // Fetch event context for anomaly dates
   useEffect(() => {
@@ -124,6 +147,9 @@ export function ForecastChart({
     (f) => f.model_name === selectedModel,
   )
   if (!modelForecast) return null
+
+  const canCompareYears = spansMoreThanAYear(series.points)
+  const yoy = compareYears && canCompareYears
 
   const actualData = series.points.map((p) => ({ x: p.date, y: p.value }))
   const hasSmoothed = !!analysis?.trend.smoothed
@@ -213,7 +239,7 @@ export function ForecastChart({
         borderDash: [6, 4],
         label: {
           display: false,
-          content: `Break · ${brk.date}`,
+          content: [breakLabel(brk), onDateClick ? 'Click: what changed after?' : ''].filter(Boolean),
           position: 'start',
           backgroundColor: 'rgba(30, 30, 30, 0.9)',
           color: '#fff',
@@ -234,9 +260,8 @@ export function ForecastChart({
   if (analysis && showAnomalies) {
     analysis.anomalies.anomalies.forEach((a, i) => {
       const ev = eventMap[a.date]
-      const labelContent = ev
-        ? [`Anomaly: ${a.value.toFixed(1)}`, ev.headline.slice(0, 60)]
-        : [`Anomaly: ${a.value.toFixed(1)}`]
+      const head = `${formatShortDate(a.date)} · ${formatCompact(a.value)} · ${a.score.toFixed(1)}× unusual`
+      const labelContent = ev ? [head, ev.headline.slice(0, 60)] : [head]
       annotations[`anomaly-${i}`] = {
         type: 'point',
         xValue: a.date,
@@ -278,6 +303,49 @@ export function ForecastChart({
     })
   }
 
+  // Plain click -> "what changed after this date?" (drags are zooms)
+  const handleChartClick = (event: ChartEvent, _els: ActiveElement[], chart: ChartJS) => {
+    if (!onDateClick || yoy || event.x == null) return
+    const native = event.native as MouseEvent | null
+    const start = downAt.current
+    if (native && start && Math.hypot(native.clientX - start.x, native.clientY - start.y) > CLICK_SLOP_PX) {
+      return
+    }
+    const xScale = chart.scales.x
+    const cx = native?.clientX ?? 0
+    const cy = native?.clientY ?? 0
+    // A break line under the pointer wins
+    if (analysis && showBreaks) {
+      for (const brk of analysis.structural_breaks) {
+        const px = xScale.getPixelForValue(Date.parse(brk.date))
+        if (Math.abs(px - event.x) <= BREAK_HIT_PX) {
+          onDateClick({ date: brk.date, x: cx, y: cy, label: brk.label })
+          return
+        }
+      }
+    }
+    const t = xScale.getValueForPixel(event.x)
+    const pts = series.points
+    if (t == null || pts.length < 2) return
+    // Past the last actual point (the forecast) there's nothing to compare
+    const last = Date.parse(pts[pts.length - 1].date)
+    const step = (last - Date.parse(pts[0].date)) / (pts.length - 1)
+    if (t > last + step / 2) return
+    let best = pts[0]
+    let bestDist = Infinity
+    for (const p of pts) {
+      const d = Math.abs(Date.parse(p.date) - t)
+      if (d < bestDist) {
+        best = p
+        bestDist = d
+      }
+    }
+    onDateClick({ date: best.date, x: cx, y: cy })
+  }
+
+  const tooltipLabel = (ctx: { dataset: { label?: string }; parsed: { y: number | null } }) =>
+    `${ctx.dataset.label ?? ''}: ${formatPrecise(ctx.parsed.y)}`
+
   const options = {
     responsive: true,
     maintainAspectRatio: false,
@@ -285,14 +353,20 @@ export function ForecastChart({
       mode: 'index' as const,
       intersect: false,
     },
+    onClick: handleChartClick,
+    onHover: (_e: ChartEvent, _els: ActiveElement[], chart: ChartJS) => {
+      // Hint that a click does something
+      if (onDateClick && chart.canvas) chart.canvas.style.cursor = 'crosshair'
+    },
     scales: {
       x: {
         type: 'time' as const,
-        time: { unit: getTimeUnit(resample) },
+        time: { unit: getTimeUnit(resample), tooltipFormat: 'MMM d, yyyy' },
         title: { display: true, text: 'Date' },
       },
       y: {
         title: { display: true, text: getYAxisLabel(series) },
+        ticks: { callback: compactTick },
       },
     },
     plugins: {
@@ -301,6 +375,10 @@ export function ForecastChart({
           filter: (item: { text: string }) =>
             !item.text.startsWith('95% CI'),
         },
+      },
+      tooltip: {
+        filter: (item: { dataset: { label?: string } }) => !item.dataset.label?.startsWith('95% CI'),
+        callbacks: { label: tooltipLabel },
       },
       zoom: {
         zoom: {
@@ -311,6 +389,55 @@ export function ForecastChart({
       annotation: {
         annotations,
       },
+    },
+  }
+
+  // --- Year-over-year overlay: one line per calendar year, Jan-Dec ---
+  const yearTrend = smoothing === 'light' || smoothing === 'medium' || smoothing === 'heavy'
+  const yearSource: DataPoint[] =
+    (yearTrend ? smoothedPoints(analysis?.trend, smoothing) : null) ?? series.points
+  const yearLines = yoy ? buildYearLines(yearSource) : []
+  const monthly = ['month', 'quarter', 'year'].includes(getTimeUnit(resample))
+  const pastColors = isDark
+    ? ['#94a3b8', '#a78bfa', '#5eead4', '#fca5a5', '#fcd34d', '#93c5fd']
+    : ['#64748b', '#8b5cf6', '#14b8a6', '#ef4444', '#d97706', '#3b82f6']
+  const yearData = {
+    datasets: yearLines.map((line, i) => {
+      const age = yearLines.length - 1 - i
+      const current = age === 0
+      const color = current ? primary : alpha(pastColors[(age - 1) % pastColors.length], Math.max(0.35, 0.75 - 0.12 * (age - 1)))
+      return {
+        label: String(line.year),
+        data: line.points,
+        borderColor: color,
+        backgroundColor: color,
+        borderWidth: current ? 3 : 1.5,
+        pointRadius: monthly ? (current ? 3 : 2) : 0,
+        order: current ? 0 : 1 + age,
+        spanGaps: false,
+      }
+    }),
+  }
+  const yearOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'x' as const, intersect: false },
+    scales: {
+      x: {
+        type: 'time' as const,
+        min: '2000-01-01',
+        max: '2000-12-31',
+        time: { unit: 'month' as const, displayFormats: { month: 'MMM' }, tooltipFormat: monthly ? 'MMMM' : 'MMM d' },
+        title: { display: false, text: '' },
+      },
+      y: {
+        title: { display: true, text: getYAxisLabel(series) },
+        ticks: { callback: compactTick },
+      },
+    },
+    plugins: {
+      legend: { labels: { boxWidth: 24 } },
+      tooltip: { callbacks: { label: tooltipLabel } },
     },
   }
 
@@ -330,9 +457,25 @@ export function ForecastChart({
           }}
         >
           <Typography variant="subtitle2">Time Series & Forecast</Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
+            {canCompareYears && (
+              <FormControlLabel
+                sx={{ mr: 0.5 }}
+                control={
+                  <Switch
+                    size="small"
+                    checked={compareYears}
+                    onChange={(e) => setCompareYears(e.target.checked)}
+                    slotProps={{ input: { 'aria-label': 'Compare years' } }}
+                  />
+                }
+                label={<Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>Compare years</Typography>}
+                title="Overlay each calendar year, aligned Jan-Dec"
+              />
+            )}
             <FormControlLabel
               sx={{ mr: 0.5 }}
+              disabled={yoy}
               control={
                 <Switch
                   size="small"
@@ -362,12 +505,30 @@ export function ForecastChart({
             slopePctPerMonth={analysis?.trend.smoothed?.slope_pct_per_month}
           />
         )}
-        <Box sx={{ height: { xs: 260, sm: 320 } }}>
-          <Line ref={chartRef} data={data} options={options} />
+        <Box
+          sx={{ height: { xs: 260, sm: 320 } }}
+          onPointerDown={(e) => {
+            downAt.current = { x: e.clientX, y: e.clientY }
+          }}
+        >
+          {yoy ? (
+            <Line key="yoy" data={yearData} options={yearOptions} />
+          ) : (
+            <Line key="series" ref={chartRef} data={data} options={options} />
+          )}
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-          Tip: drag across the chart to zoom in
-          {showAnnotations && ' · shaded bands = regimes, dashed lines = breaks, red dots = anomalies'}
+          {yoy ? (
+            <>
+              Each line is one calendar year{monthly ? ' (by month)' : ', aligned by day of year'}
+              {yearTrend && yearSource !== series.points ? `, ${smoothing} trend` : ''}; the current year is bold.
+            </>
+          ) : (
+            <>
+              Drag across the chart to zoom{onDateClick ? ' · click a date to see what changed after it' : ''}
+              {showAnnotations && ' · shaded bands = regimes, dashed lines = breaks, red dots = anomalies'}
+            </>
+          )}
         </Typography>
       </CardContent>
     </Card>

@@ -53,6 +53,8 @@ export interface TrendSignal {
   direction: string
   momentum: number
   acceleration: number
+  /** "accelerating", "growth slowing", "decline speeding up", "decline easing" or null. */
+  acceleration_label?: string | null
   moving_averages: MovingAverage[]
   momentum_series: DataPoint[]
   /** Human-readable momentum, e.g. "+3.2% / month" (newer backends). */
@@ -95,6 +97,10 @@ export interface StructuralBreak {
   index: number
   method: string
   confidence: number
+  /** Plain-English kind: "big drop", "big jump", "shift up", "trend change"... */
+  label?: string | null
+  /** Level change across the break, in % (median after vs before). */
+  change_pct?: number | null
 }
 
 export interface Regime {
@@ -337,13 +343,30 @@ export interface CausalImpactResponse {
 }
 
 // Watchlist types
+/**
+ * threshold: latest value above/below a number
+ * trend_flip: trend direction (rising/falling/stable) changes between checks
+ * slope: trend slope crosses slope_threshold (% per month)
+ */
+export type WatchlistAlertType = 'threshold' | 'trend_flip' | 'slope'
+
 export interface WatchlistAddRequest {
   name: string
   source: string
   query: string
   resample?: string
+  alert_type?: WatchlistAlertType | null
   threshold_direction?: 'above' | 'below'
   threshold_value?: number
+  slope_threshold?: number
+}
+
+export interface WatchlistUpdateRequest {
+  name?: string
+  alert_type?: WatchlistAlertType | null
+  threshold_direction?: 'above' | 'below' | null
+  threshold_value?: number | null
+  slope_threshold?: number | null
 }
 
 export interface WatchlistItem {
@@ -351,14 +374,20 @@ export interface WatchlistItem {
   name: string
   source: string
   query: string
-  resample?: string
-  threshold_direction?: 'above' | 'below'
-  threshold_value?: number
-  last_value?: number
-  last_checked_at?: string
+  resample?: string | null
+  alert_type?: WatchlistAlertType | null
+  threshold_direction?: 'above' | 'below' | null
+  threshold_value?: number | null
+  slope_threshold?: number | null
+  last_value?: number | null
+  last_direction?: 'rising' | 'falling' | 'stable' | null
+  /** Trend slope at the last check, % per month. */
+  last_slope?: number | null
+  last_checked_at?: string | null
   created_at: string
   triggered: boolean
-  trend_direction?: 'rising' | 'falling' | 'stable'
+  trend_direction?: 'rising' | 'falling' | 'stable' | null
+  alert_message?: string | null
 }
 
 export interface WatchlistCheckResponse {

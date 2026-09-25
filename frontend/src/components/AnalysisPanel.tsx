@@ -8,10 +8,13 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Collapse from '@mui/material/Collapse'
 import Divider from '@mui/material/Divider'
 import Link from '@mui/material/Link'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { fetchEventContext } from '../api/client'
-import type { EventContext, TrendAnalysis, TrendSignal } from '../api/types'
+import type { EventContext, StructuralBreak, TrendAnalysis, TrendSignal } from '../api/types'
+import { formatCompact, formatPrecise, formatShortDate } from '../utils/format'
+import type { ImpactRequest } from './ChangeImpactPopover'
 
 /** Readable momentum: backend label if present, else a formatted percent per step. */
 function formatMomentum(trend: TrendSignal): string {
@@ -25,14 +28,20 @@ function formatMomentum(trend: TrendSignal): string {
   return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% / step`
 }
 
-function describeAcceleration(acceleration: number): string | null {
-  if (!Number.isFinite(acceleration) || acceleration === 0) return null
-  return acceleration > 0 ? 'accelerating' : 'decelerating'
+/** Plain wording for a break: "big drop (-39%)", "trend change". */
+function describeBreak(b: StructuralBreak): string {
+  const kind = b.label || 'change'
+  const pct = b.change_pct
+  return pct != null && Number.isFinite(pct) && Math.abs(pct) >= 5
+    ? `${kind} (${pct > 0 ? '+' : ''}${pct.toFixed(0)}%)`
+    : kind
 }
 
 interface Props {
   analysis: TrendAnalysis
   compact?: boolean
+  /** Ask "what changed after" a structural break. */
+  onBreakClick?: (req: ImpactRequest) => void
 }
 
 const DIRECTION_COLORS: Record<string, 'success' | 'error' | 'default'> = {
@@ -41,11 +50,12 @@ const DIRECTION_COLORS: Record<string, 'success' | 'error' | 'default'> = {
   stable: 'default',
 }
 
-export function AnalysisPanel({ analysis, compact = false }: Props) {
+export function AnalysisPanel({ analysis, compact = false, onBreakClick }: Props) {
   const { trend, seasonality, anomalies, structural_breaks } = analysis
   const chipColor = DIRECTION_COLORS[trend.direction] || 'default'
   const momentumText = formatMomentum(trend)
-  const accelText = describeAcceleration(trend.acceleration)
+  // From the smoothed trend's change in slope; null when not meaningful
+  const accelText = trend.acceleration_label ?? null
   const summaryLines = (analysis.summary_lines ?? []).filter((l) => l && l.trim())
 
   const [eventContexts, setEventContexts] = useState<EventContext[]>([])
@@ -154,13 +164,20 @@ export function AnalysisPanel({ analysis, compact = false }: Props) {
           Anomalies
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          {anomalies.anomaly_count} of {anomalies.total_points} points flagged
-          ({anomalies.method})
+          {anomalies.anomaly_count === 0
+            ? 'Nothing unusual against the trend'
+            : `${anomalies.anomaly_count} unusual ${anomalies.anomaly_count === 1 ? 'day' : 'points'} of ${anomalies.total_points}`}
         </Typography>
         {anomalies.anomalies.slice(0, 5).map((a, i) => (
-          <Typography key={i} variant="caption" display="block" color="text.secondary" sx={{ ml: 1 }}>
-            {a.date}: {a.value.toFixed(1)} (score: {a.score.toFixed(2)})
-          </Typography>
+          <Tooltip
+            key={i}
+            placement="left"
+            title={`${formatPrecise(a.value)} on ${a.date} · ${anomalies.method} score ${a.score.toFixed(2)} (threshold ${anomalies.threshold})`}
+          >
+            <Typography variant="caption" display="block" color="text.secondary" sx={{ ml: 1, width: 'fit-content' }} data-testid="anomaly-row">
+              {formatShortDate(a.date)} · {formatCompact(a.value)} · {a.score.toFixed(1)}× unusual
+            </Typography>
+          </Tooltip>
         ))}
 
         {anomalies.anomaly_count > 0 && (
@@ -217,9 +234,25 @@ export function AnalysisPanel({ analysis, compact = false }: Props) {
           </Typography>
         ) : (
           structural_breaks.map((b, i) => (
-            <Typography key={i} variant="caption" display="block" color="text.secondary" sx={{ ml: 1 }}>
-              {b.date} ({b.method}, confidence: {b.confidence.toFixed(2)})
-            </Typography>
+            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 1 }}>
+              <Tooltip placement="left" title={`${b.date} · ${b.method} break, confidence ${b.confidence.toFixed(2)}`}>
+                <Typography variant="caption" color="text.secondary" data-testid="break-row">
+                  {formatShortDate(b.date)} · {describeBreak(b)}
+                </Typography>
+              </Tooltip>
+              {onBreakClick && (
+                <Link
+                  component="button"
+                  variant="caption"
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    const r = e.currentTarget.getBoundingClientRect()
+                    onBreakClick({ date: b.date, x: r.left + r.width / 2, y: r.bottom, label: b.label })
+                  }}
+                >
+                  What changed?
+                </Link>
+              )}
+            </Box>
           ))
         )}
       </CardContent>

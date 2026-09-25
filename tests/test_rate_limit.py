@@ -12,10 +12,20 @@ from app.middleware.rate_limit import (
 class TestRateLimitConfig:
     def test_default_values(self):
         config = RateLimitConfig()
-        assert config.requests_per_minute == 60
-        assert config.requests_per_hour == 1000
-        assert config.burst_size == 10
+        assert config.requests_per_minute == 120
+        assert config.requests_per_hour == 3000
+        assert config.burst_size == 40
         assert config.enabled is True
+
+    def test_default_burst_covers_quick_reloads(self):
+        """Three quick page loads (~10 API calls each) fit in the burst."""
+        limiter = RateLimiter(RateLimitConfig())
+        request = MagicMock()
+        request.headers = {}
+        request.client.host = "127.0.0.1"
+        for _ in range(30):
+            allowed, _ = limiter.check(request)
+            assert allowed is True
 
     def test_custom_values(self):
         config = RateLimitConfig(
@@ -131,3 +141,61 @@ class TestRateLimitMiddleware:
             prefix.startswith("/assets") or prefix.startswith("/static")
             for prefix in middleware.SKIP_PREFIXES
         )
+
+
+def _app_client(config=None, ai_config=None):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+
+    @app.get("/api/sources")
+    async def sources():
+        return []
+
+    @app.get("/api/views/{hash_id}")
+    async def view(hash_id: str):
+        return {}
+
+    @app.get("/api/series")
+    async def series():
+        return {}
+
+    @app.get("/api/v1/insight")
+    async def insight():
+        return {}
+
+    app.add_middleware(RateLimitMiddleware, config=config, ai_config=ai_config)
+    return TestClient(app)
+
+
+class TestRateLimitPaths:
+    def test_metadata_gets_are_exempt(self):
+        client = _app_client(RateLimitConfig(burst_size=2))
+        for _ in range(10):
+            assert client.get("/api/sources").status_code == 200
+            assert client.get("/api/views/abc123").status_code == 200
+
+    def test_data_endpoints_are_limited(self):
+        client = _app_client(RateLimitConfig(burst_size=2))
+        codes = [client.get("/api/series").status_code for _ in range(4)]
+        assert codes[:2] == [200, 200]
+        assert 429 in codes[2:]
+
+    def test_ai_endpoints_have_their_own_tighter_bucket(self):
+        client = _app_client(
+            RateLimitConfig(burst_size=40),
+            ai_config=RateLimitConfig(burst_size=2),
+        )
+        codes = [client.get("/api/v1/insight").status_code for _ in range(3)]
+        assert codes == [200, 200, 429]
+        # The general bucket still has room for regular calls
+        assert client.get("/api/series").status_code == 200
+
+    def test_api_subpath(self):
+        from app.middleware.rate_limit import api_subpath
+
+        assert api_subpath("/api/v1/insight") == "/insight"
+        assert api_subpath("/api/sources") == "/sources"
+        assert api_subpath("/apiary") is None
+        assert api_subpath("/assets/x.js") is None

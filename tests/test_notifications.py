@@ -73,7 +73,7 @@ class TestWebhookPayload:
         payload = _build_payload("slack", alerts)
         assert "Alert A" in payload["text"]
         assert "Alert B" in payload["text"]
-        assert "2 thresholds" in payload["text"]
+        assert "2 alerts" in payload["text"]
 
 
 # --- Webhook sending ---

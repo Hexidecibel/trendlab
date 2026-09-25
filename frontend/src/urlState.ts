@@ -3,12 +3,29 @@
 //
 //   Forecast: ?source=pypi&q=requests&h=14&start=..&end=..&resample=week&apply=..&smooth=medium
 //   Compare:  ?tab=compare&cs=npm&cq=react&cs=npm&cq=vue&resample=..&smooth=..&mode=index
+//             [&cmp=cohort|correlation]  (Compare's tool; Overlay is the default)
 //   Saved:    ?view=<hash>[&smooth=..]   (the share link SaveViewButton generates)
+//
+// Old links from when Correlate / Cohort were separate tabs (?tab=correlate,
+// ?tab=cohort) open Compare in the matching tool.
 
 import { isSmoothingPreset } from './smoothing'
 import type { SmoothingPreset } from './smoothing'
 
+/** Scale of the Overlay chart. */
 export type CompareMode = 'index' | 'raw'
+
+/** Which Compare tool is showing. */
+export type CompareTool = 'overlay' | 'cohort' | 'correlation'
+
+export const COMPARE_TOOLS: CompareTool[] = ['overlay', 'cohort', 'correlation']
+
+/** Series each tool takes at most. */
+export const MAX_ITEMS: Record<CompareTool, number> = { overlay: 3, correlation: 2, cohort: 20 }
+
+export function isCompareTool(v: unknown): v is CompareTool {
+  return typeof v === 'string' && (COMPARE_TOOLS as string[]).includes(v)
+}
 
 export interface ForecastUrlState {
   kind: 'forecast'
@@ -28,6 +45,7 @@ export interface CompareUrlState {
   resample?: string
   smooth?: SmoothingPreset
   mode?: CompareMode
+  tool?: CompareTool
 }
 
 export interface ViewUrlState {
@@ -58,21 +76,26 @@ export function parseUrlState(search: string): UrlState | null {
   const view = params.get('view')
   if (view && HASH_RE.test(view)) return { kind: 'view', hash: view, smooth }
 
-  if (params.get('tab') === 'compare') {
+  const tab = params.get('tab')
+  if (tab === 'compare' || tab === 'correlate' || tab === 'cohort') {
+    const cmp = params.get('cmp')
+    const tool: CompareTool =
+      tab === 'correlate' ? 'correlation' : tab === 'cohort' ? 'cohort' : isCompareTool(cmp) ? cmp : 'overlay'
     const sources = params.getAll('cs')
     const queries = params.getAll('cq')
     const items = sources
       .map((source, i) => ({ source, query: queries[i] ?? '' }))
       .filter((it) => it.source && it.query)
-      .slice(0, 3)
-    if (items.length < 2) return null
+      .slice(0, MAX_ITEMS[tool])
     const mode = params.get('mode')
+    // Fewer than two series still opens the tool (with an empty form)
     return {
       kind: 'compare',
-      items,
+      items: items.length >= 2 ? items : [],
       resample: opt(params, 'resample'),
       smooth,
       mode: mode === 'raw' || mode === 'index' ? mode : undefined,
+      tool,
     }
   }
 
@@ -106,6 +129,7 @@ export function buildUrlSearch(state: UrlState | null): string {
     }
     if (state.resample) p.set('resample', state.resample)
     if (state.mode) p.set('mode', state.mode)
+    if (state.tool && state.tool !== 'overlay') p.set('cmp', state.tool)
   } else {
     p.set('source', state.source)
     p.set('q', state.query)

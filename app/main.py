@@ -161,12 +161,21 @@ app.add_middleware(DeprecationMiddleware)
 
 # Rate limiting middleware (configurable via environment)
 rate_limit_config = RateLimitConfig(
-    requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")),
-    requests_per_hour=int(os.getenv("RATE_LIMIT_PER_HOUR", "1000")),
-    burst_size=int(os.getenv("RATE_LIMIT_BURST", "10")),
+    requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "120")),
+    requests_per_hour=int(os.getenv("RATE_LIMIT_PER_HOUR", "3000")),
+    burst_size=int(os.getenv("RATE_LIMIT_BURST", "40")),
     enabled=os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true",
 )
-app.add_middleware(RateLimitMiddleware, config=rate_limit_config)
+# Tighter bucket for the LLM-backed endpoints (they cost money)
+ai_rate_limit_config = RateLimitConfig(
+    requests_per_minute=int(os.getenv("RATE_LIMIT_AI_PER_MINUTE", "20")),
+    requests_per_hour=int(os.getenv("RATE_LIMIT_AI_PER_HOUR", "200")),
+    burst_size=int(os.getenv("RATE_LIMIT_AI_BURST", "10")),
+    enabled=rate_limit_config.enabled,
+)
+app.add_middleware(
+    RateLimitMiddleware, config=rate_limit_config, ai_config=ai_rate_limit_config
+)
 
 # Secret phrase authentication (if configured)
 app.add_middleware(SecretPhraseMiddleware)

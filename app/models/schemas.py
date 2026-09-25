@@ -1,4 +1,5 @@
 import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -102,7 +103,12 @@ class TrendSignal(BaseModel):
     # Recent slope of the medium-smoothed trend, as a fraction per month
     # (0.032 == +3.2% / month)
     momentum: float
+    # Change in the smoothed trend's slope (recent span minus the span
+    # before it), in % per month
     acceleration: float
+    # "accelerating", "growth slowing", "decline speeding up",
+    # "decline easing", or None when the change isn't meaningful
+    acceleration_label: str | None = None
     moving_averages: list[MovingAverage]
     momentum_series: list[DataPoint]
     smoothed: SmoothedSeries | None = None
@@ -137,6 +143,11 @@ class StructuralBreak(BaseModel):
     index: int
     method: str
     confidence: float
+    # Plain-English kind, e.g. "big drop", "big jump", "shift down",
+    # "trend change" (filled by the analysis engine)
+    label: str | None = None
+    # Level change across the break (%), median after vs before
+    change_pct: float | None = None
 
 
 class Regime(BaseModel):
@@ -502,6 +513,9 @@ class CausalImpactResponse(BaseModel):
 # --- Watchlist models ---
 
 
+WatchlistAlertType = Literal["threshold", "trend_flip", "slope"]
+
+
 class WatchlistAddRequest(BaseModel):
     """Request to add a trend to the watchlist."""
 
@@ -509,8 +523,23 @@ class WatchlistAddRequest(BaseModel):
     source: str
     query: str
     resample: str | None = None
+    # "threshold" (default when threshold fields are set), "trend_flip"
+    # (direction changes between checks) or "slope" (trend slope crosses
+    # slope_threshold, in % per month). None = no alert, just watch.
+    alert_type: WatchlistAlertType | None = None
     threshold_direction: str | None = None  # "above" or "below"
     threshold_value: float | None = None
+    slope_threshold: float | None = None
+
+
+class WatchlistUpdateRequest(BaseModel):
+    """Change a watch's name or alert. Only the fields sent are changed."""
+
+    name: str | None = None
+    alert_type: WatchlistAlertType | None = None
+    threshold_direction: str | None = None
+    threshold_value: float | None = None
+    slope_threshold: float | None = None
 
 
 class WatchlistItemResponse(BaseModel):
@@ -521,14 +550,19 @@ class WatchlistItemResponse(BaseModel):
     source: str
     query: str
     resample: str | None = None
+    alert_type: str | None = None
     threshold_direction: str | None = None
     threshold_value: float | None = None
+    slope_threshold: float | None = None
     last_value: float | None = None
+    last_direction: str | None = None
+    last_slope: float | None = None  # trend slope, % per month
     last_checked_at: datetime.datetime | None = None
     created_at: datetime.datetime
     # Computed fields for status
-    triggered: bool = False  # True if threshold crossed
+    triggered: bool = False  # True if the alert condition fired
     trend_direction: str | None = None  # "rising", "falling", "stable"
+    alert_message: str | None = None  # e.g. "trend flipped from rising to falling"
 
 
 class WatchlistCheckResponse(BaseModel):

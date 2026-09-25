@@ -448,20 +448,38 @@ async def calculate_forecast_accuracy(
 
 def _watchlist_to_response(record: WatchlistItem) -> WatchlistItemResponse:
     """Convert DB record to response model."""
+
+    def num(v) -> float | None:
+        return float(v) if v is not None else None
+
+    alert_type = record.alert_type
+    if alert_type is None and record.threshold_direction:
+        alert_type = "threshold"  # rows from before alert types existed
     return WatchlistItemResponse(
         id=record.id,
         name=record.name,
         source=record.source,
         query=record.query,
         resample=record.resample,
+        alert_type=alert_type,
         threshold_direction=record.threshold_direction,
-        threshold_value=(
-            float(record.threshold_value) if record.threshold_value else None
-        ),
-        last_value=float(record.last_value) if record.last_value else None,
+        threshold_value=num(record.threshold_value),
+        slope_threshold=num(record.slope_threshold),
+        last_value=num(record.last_value),
+        last_direction=record.last_direction,
+        last_slope=num(record.last_slope),
         last_checked_at=record.last_checked_at,
         created_at=record.created_at,
+        trend_direction=record.last_direction,
     )
+
+
+class WatchlistDuplicateError(ValueError):
+    """The source/query pair is already on the watchlist."""
+
+    def __init__(self, existing: WatchlistItemResponse):
+        super().__init__("Already on the watchlist")
+        self.existing = existing
 
 
 async def add_watchlist_item(
@@ -471,16 +489,32 @@ async def add_watchlist_item(
     resample: str | None = None,
     threshold_direction: str | None = None,
     threshold_value: float | None = None,
+    alert_type: str | None = None,
+    slope_threshold: float | None = None,
 ) -> WatchlistItemResponse:
-    """Add a new item to the watchlist."""
+    """Add a new item to the watchlist.
+
+    Raises ``WatchlistDuplicateError`` (carrying the existing item) if the
+    source/query pair is already watched.
+    """
+    if alert_type is None and threshold_direction and threshold_value is not None:
+        alert_type = "threshold"
     async with _engine_mod.async_session() as session:
+        stmt = select(WatchlistItem).where(
+            WatchlistItem.source == source, WatchlistItem.query == query
+        )
+        existing = (await session.execute(stmt)).scalar_one_or_none()
+        if existing is not None:
+            raise WatchlistDuplicateError(_watchlist_to_response(existing))
         record = WatchlistItem(
             name=name,
             source=source,
             query=query,
             resample=resample,
+            alert_type=alert_type,
             threshold_direction=threshold_direction,
-            threshold_value=int(threshold_value) if threshold_value else None,
+            threshold_value=threshold_value,
+            slope_threshold=slope_threshold,
         )
         session.add(record)
         await session.commit()
@@ -508,12 +542,35 @@ async def get_watchlist_item(item_id: int) -> WatchlistItemResponse | None:
         return _watchlist_to_response(record)
 
 
+# Sentinel for "leave this field unchanged" (None is a meaningful value)
+_UNSET = object()
+
+
 async def update_watchlist_item(
     item_id: int,
     last_value: float | None = None,
     last_checked_at: datetime.datetime | None = None,
+    last_direction=_UNSET,
+    last_slope=_UNSET,
+    **fields,
 ) -> WatchlistItemResponse | None:
-    """Update a watchlist item with new values."""
+    """Update a watchlist item.
+
+    ``last_value``/``last_checked_at`` are only written when not None;
+    ``last_direction``/``last_slope`` whenever passed (None clears them).
+    ``fields`` sets any of name, alert_type, threshold_direction,
+    threshold_value and slope_threshold as given (None clears).
+    """
+    allowed = {
+        "name",
+        "alert_type",
+        "threshold_direction",
+        "threshold_value",
+        "slope_threshold",
+    }
+    unknown = set(fields) - allowed
+    if unknown:
+        raise TypeError(f"Unknown watchlist fields: {sorted(unknown)}")
     async with _engine_mod.async_session() as session:
         stmt = select(WatchlistItem).where(WatchlistItem.id == item_id)
         result = await session.execute(stmt)
@@ -522,9 +579,15 @@ async def update_watchlist_item(
             return None
 
         if last_value is not None:
-            record.last_value = int(last_value)
+            record.last_value = last_value
         if last_checked_at is not None:
             record.last_checked_at = last_checked_at
+        if last_direction is not _UNSET:
+            record.last_direction = last_direction
+        if last_slope is not _UNSET:
+            record.last_slope = last_slope
+        for key, value in fields.items():
+            setattr(record, key, value)
 
         await session.commit()
         await session.refresh(record)

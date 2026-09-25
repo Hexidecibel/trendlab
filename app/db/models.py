@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -122,9 +123,19 @@ class WatchlistItem(Base):
     source = Column(String, nullable=False)
     query = Column(String, nullable=False)
     resample = Column(String)  # Optional resampling
+    # 'threshold' (value above/below), 'trend_flip' (direction changes since
+    # the last check) or 'slope' (trend slope crosses slope_threshold). NULL
+    # on rows from before alert types existed == 'threshold'.
+    alert_type = Column(String)
     threshold_direction = Column(String)  # 'above', 'below', or None
-    threshold_value = Column(Integer)  # Threshold for alerts
-    last_value = Column(Integer)  # Most recent value
+    # Float columns: older databases declared these INTEGER, which SQLite
+    # happily stores non-integral values in (type affinity), so no rewrite
+    # is needed.
+    threshold_value = Column(Float)  # Threshold for alerts
+    slope_threshold = Column(Float)  # % per month, for 'slope' alerts
+    last_value = Column(Float)  # Most recent value
+    last_direction = Column(String)  # Trend direction at the last check
+    last_slope = Column(Float)  # Trend slope (% / month) at the last check
     last_checked_at = Column(DateTime)  # When last refreshed
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 

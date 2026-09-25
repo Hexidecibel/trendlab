@@ -64,3 +64,23 @@ def largest_step_near(values: np.ndarray, idx: int, rising: bool) -> int:
         if shift > best_shift:
             best, best_shift = j, shift
     return best
+
+
+def pin_step_indices(values: np.ndarray, break_indices: list[int]) -> list[int]:
+    """Move each break with a large level shift onto the step itself.
+
+    Returns one index per input index (same order). Breaks without a
+    >= ``JUMP_MIN_PCT`` shift are left where they are.
+    """
+    n = len(values)
+    idxs = sorted({int(i) for i in break_indices if 0 < int(i) < n})
+    pinned: dict[int, int] = {}
+    for k, idx in enumerate(idxs):
+        prev_idx = idxs[k - 1] if k > 0 else 0
+        next_idx = idxs[k + 1] if k + 1 < len(idxs) else n
+        jump = jump_pct(values, idx, idx - prev_idx, next_idx - idx)
+        new = idx
+        if jump is not None and abs(jump) >= JUMP_MIN_PCT:
+            new = largest_step_near(values, idx, rising=jump > 0)
+        pinned[idx] = new if 0 < new < n else idx
+    return [pinned.get(int(i), int(i)) for i in break_indices]

@@ -3,6 +3,7 @@ import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import type { ForecastComparison } from '../api/types'
+import { formatCompact } from '../utils/format'
 
 interface Props {
   forecast: ForecastComparison
@@ -37,7 +38,7 @@ export function ModelSelector({ forecast, selected, onChange }: Props) {
             >
               {f.model_name}
               {isRecommended && ' *'}
-              {ev && ` (MAE: ${ev.mae.toFixed(2)})`}
+              {ev && ` (MAE: ${formatCompact(ev.mae)})`}
             </ToggleButton>
           )
         })}

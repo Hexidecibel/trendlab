@@ -91,7 +91,9 @@ cd frontend && npm install && npm run dev
 | `GITHUB_TOKEN` | For GitHub adapter | GitHub personal access token |
 | `FOOTBALL_DATA_TOKEN` | For football adapter | Football-Data.org API key |
 | `RATE_LIMIT_ENABLED` | No | Enable rate limiting (default: true) |
-| `RATE_LIMIT_PER_MINUTE` | No | Requests per minute (default: 60) |
+| `RATE_LIMIT_PER_MINUTE` | No | Requests per minute (default: 120) |
+| `RATE_LIMIT_BURST` | No | Requests allowed in quick succession (default: 40) |
+| `RATE_LIMIT_AI_PER_MINUTE` / `RATE_LIMIT_AI_BURST` | No | Separate, tighter limit for the LLM endpoints (default: 20 / 10) |
 | `LOG_LEVEL` | No | Logging level (default: INFO) |
 | `LOG_FORMAT` | No | Log format: json or text (default: json) |
 

@@ -23,6 +23,7 @@ import type {
   WatchlistAddRequest,
   WatchlistCheckResponse,
   WatchlistItem,
+  WatchlistUpdateRequest,
 } from './types'
 
 export const API_BASE = '/api/v1'
@@ -273,6 +274,21 @@ export async function addToWatchlist(
   request: WatchlistAddRequest,
 ): Promise<WatchlistItem> {
   return postJson(`${API_BASE}/watchlist`, request)
+}
+
+export async function updateWatchlistItem(
+  itemId: number,
+  request: WatchlistUpdateRequest,
+): Promise<WatchlistItem> {
+  const response = await fetch(`${API_BASE}/watchlist/${itemId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!response.ok) {
+    throw await extractError(response)
+  }
+  return response.json()
 }
 
 export async function checkWatchlist(): Promise<WatchlistCheckResponse> {

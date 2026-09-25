@@ -186,3 +186,31 @@ class TestCausalImpactEndpoint:
             )
 
         assert response.status_code == 422
+
+
+class TestCounterfactualDoesNotRunAway:
+    """A curve fitted on a short pre-period must not be projected far ahead."""
+
+    @pytest.mark.asyncio
+    async def test_long_post_period_uses_a_line_and_stays_non_negative(self):
+        import datetime
+
+        from app.models.schemas import DataPoint, TimeSeries
+
+        start = datetime.date(2024, 1, 1)
+        # Concave pre-period (rises, then bends down): a quadratic fitted to
+        # it dives far below zero over a 140-day post-period.
+        pre = [100 + 10 * i - 0.3 * i * i for i in range(40)]
+        post = [50.0] * 140
+        ts = TimeSeries(
+            source="t",
+            query="q",
+            points=[
+                DataPoint(date=start + datetime.timedelta(days=i), value=v)
+                for i, v in enumerate(pre + post)
+            ],
+        )
+        event = (start + datetime.timedelta(days=40)).isoformat()
+        result = await analyze_causal_impact(ts, event)
+        assert all(p.predicted >= 0 for p in result.pointwise)
+        assert -100.0 <= result.relative_impact_pct

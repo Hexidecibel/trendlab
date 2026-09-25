@@ -54,6 +54,7 @@ from app.models.schemas import (
     WatchlistAddRequest,
     WatchlistCheckResponse,
     WatchlistItemResponse,
+    WatchlistUpdateRequest,
 )
 from app.plugins import reload_plugins, scan_plugins
 from app.services.aggregation import resample_series
@@ -1082,26 +1083,112 @@ async def delete_view(hash_id: str):
 # --- Watchlist Endpoints ---
 
 
+def _validate_watch_alert(
+    alert_type: str | None,
+    threshold_direction: str | None,
+    threshold_value: float | None,
+    slope_threshold: float | None,
+) -> None:
+    if alert_type == "threshold" and (
+        threshold_direction not in ("above", "below") or threshold_value is None
+    ):
+        raise friendly_http_error(
+            422,
+            "A threshold alert needs a direction and a value",
+            hint='Set threshold_direction to "above" or "below" and a threshold_value.',
+            error_code="WATCHLIST_BAD_ALERT",
+        )
+    if alert_type == "slope" and slope_threshold is None:
+        raise friendly_http_error(
+            422,
+            "A slope alert needs a slope_threshold (% per month)",
+            hint="e.g. 5 to be told when the trend grows faster than +5%/month.",
+            error_code="WATCHLIST_BAD_ALERT",
+        )
+
+
 @router.post("/watchlist", response_model=WatchlistItemResponse, tags=["Watchlist"])
 async def add_to_watchlist(request: WatchlistAddRequest):
     """
     Add a trend to the watchlist.
 
-    Watch a specific source/query combination and optionally set a threshold
-    to be notified when the value crosses it.
+    Watch a specific source/query combination and optionally set an alert:
 
-    **Threshold options:**
-    - `threshold_direction`: "above" or "below"
-    - `threshold_value`: The numeric threshold to watch for
+    - `alert_type="threshold"` with `threshold_direction` ("above"/"below")
+      and `threshold_value`: the latest value crosses a number
+    - `alert_type="trend_flip"`: the trend direction (rising / falling /
+      stable) changes between checks
+    - `alert_type="slope"` with `slope_threshold` (% per month): the trend
+      slope crosses that rate, in either direction
+
+    Returns 409 (with the existing item in `existing`) if the
+    source/query pair is already watched.
     """
-    return await repo.add_watchlist_item(
-        name=request.name,
-        source=request.source,
-        query=request.query,
-        resample=request.resample,
-        threshold_direction=request.threshold_direction,
-        threshold_value=request.threshold_value,
+    alert_type = request.alert_type
+    if (
+        alert_type is None
+        and request.threshold_direction
+        and request.threshold_value is not None
+    ):
+        alert_type = "threshold"
+    _validate_watch_alert(
+        alert_type,
+        request.threshold_direction,
+        request.threshold_value,
+        request.slope_threshold,
     )
+    try:
+        return await repo.add_watchlist_item(
+            name=request.name,
+            source=request.source,
+            query=request.query,
+            resample=request.resample,
+            alert_type=alert_type,
+            threshold_direction=request.threshold_direction,
+            threshold_value=request.threshold_value,
+            slope_threshold=request.slope_threshold,
+        )
+    except repo.WatchlistDuplicateError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "detail": "Already on the watchlist",
+                "hint": "Edit the existing watch's alert instead.",
+                "error_code": "WATCHLIST_DUPLICATE",
+                "existing": e.existing.model_dump(mode="json"),
+            },
+        ) from e
+
+
+@router.patch(
+    "/watchlist/{item_id}", response_model=WatchlistItemResponse, tags=["Watchlist"]
+)
+async def update_watchlist_item(item_id: int, request: WatchlistUpdateRequest):
+    """
+    Rename a watch or change its alert. Only the fields sent are changed;
+    send `alert_type: null` to turn the alert off.
+    """
+    current = await repo.get_watchlist_item(item_id)
+    if current is None:
+        raise friendly_http_error(
+            404,
+            "Watchlist item not found",
+            hint="This watchlist item may have been deleted.",
+            error_code="WATCHLIST_ITEM_NOT_FOUND",
+        )
+    fields = request.model_dump(exclude_unset=True)
+    merged = {**current.model_dump(), **fields}
+    _validate_watch_alert(
+        merged.get("alert_type"),
+        merged.get("threshold_direction"),
+        merged.get("threshold_value"),
+        merged.get("slope_threshold"),
+    )
+    if "name" in fields and not fields["name"]:
+        fields.pop("name")
+    updated = await repo.update_watchlist_item(item_id, **fields)
+    assert updated is not None
+    return updated
 
 
 @router.get("/watchlist", tags=["Watchlist"])

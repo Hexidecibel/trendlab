@@ -238,3 +238,50 @@ class TestBreakAwareMomentum:
         ts = _step_series(152, 26, before=60.0, after=42.0)
         result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 152)])
         assert abs(result.momentum_pct_per_month) < 1.0
+
+
+class TestAccelerationLabel:
+    @staticmethod
+    def _series(fn, n=180):
+        start = datetime.date(2024, 1, 1)
+        return TimeSeries(
+            source="t",
+            query="q",
+            points=[
+                DataPoint(date=start + datetime.timedelta(days=i), value=fn(i))
+                for i in range(n)
+            ],
+        )
+
+    def test_steady_linear_growth_has_no_label(self):
+        ts = make_linear_series(n=180, slope=0.5, intercept=100.0)
+        result = analyze_trend(ts)
+        assert result.acceleration_label is None
+
+    def test_speeding_up_growth_is_accelerating(self):
+        import math
+
+        # Growth rate itself rises over time (in % of level, like the label)
+        ts = self._series(lambda i: 100.0 * math.exp(0.00005 * i**2))
+        result = analyze_trend(ts)
+        assert result.direction == "rising"
+        assert result.acceleration_label == "accelerating"
+        assert result.acceleration > 0
+
+    def test_slowing_growth(self):
+        import math
+
+        ts = self._series(lambda i: 100.0 + 400.0 * (1 - math.exp(-i / 90.0)))
+        result = analyze_trend(ts)
+        assert result.direction == "rising"
+        assert result.acceleration_label == "growth slowing"
+
+    def test_noise_does_not_create_a_label(self):
+        """Raw second differences of noise used to report 'accelerating'."""
+        import numpy as np
+
+        rng = np.random.default_rng(3)
+        noise = rng.normal(0, 5, 180)
+        ts = self._series(lambda i: 1000.0 + float(noise[i]))
+        result = analyze_trend(ts)
+        assert result.acceleration_label is None

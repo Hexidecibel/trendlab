@@ -2,7 +2,11 @@
 
 import numpy as np
 
-from app.analysis.trend_metrics import DIRECTION_THRESHOLD, slope_pct_per_month
+from app.analysis.trend_metrics import (
+    DIRECTION_THRESHOLD,
+    classify_direction,
+    slope_pct_per_month,
+)
 from app.models.schemas import Regime, StructuralBreak, TimeSeries
 
 
@@ -17,8 +21,8 @@ def detect_regimes(
     - volatility (std of returns)
     - slope in % of level per month (least-squares, over actual dates)
 
-    Direction is classified against ``DIRECTION_THRESHOLD`` from
-    ``trend_metrics``.
+    Direction is classified from the slope against ``STABLE_PCT_PER_MONTH``
+    (via ``classify_direction``), falling back to the mean step return.
     """
     if len(ts.points) < 2:
         return []
@@ -57,15 +61,19 @@ def detect_regimes(
             mean_return = 0.0
             volatility = 0.0
 
-        # Classify direction
-        if mean_return > DIRECTION_THRESHOLD:
+        slope_pct = slope_pct_per_month(dates[start:end], seg_values)
+
+        # Direction follows the segment's slope (same stable band as the
+        # overall trend), so a label never contradicts the % / month shown
+        # next to it. Mean step return is only a fallback without a slope.
+        if slope_pct is not None:
+            label = classify_direction(slope_pct)
+        elif mean_return > DIRECTION_THRESHOLD:
             label = "rising"
         elif mean_return < -DIRECTION_THRESHOLD:
             label = "falling"
         else:
             label = "stable"
-
-        slope_pct = slope_pct_per_month(dates[start:end], seg_values)
 
         regimes.append(
             Regime(
