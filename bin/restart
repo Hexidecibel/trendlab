@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Thin wrapper around the existing trendlab control scripts.
+# trendlab runs as a single `docker run` container (bin/start / bin/stop), not
+# compose, so restart = stop then start.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+"$ROOT/bin/stop"
+exec "$ROOT/bin/start"
