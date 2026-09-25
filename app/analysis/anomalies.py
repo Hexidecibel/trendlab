@@ -1,4 +1,4 @@
-"""Anomaly detection using z-score and IQR methods."""
+"""Anomaly detection: residual-from-trend (default), z-score and IQR methods."""
 
 import datetime
 
@@ -106,16 +106,117 @@ def detect_iqr(
     )
 
 
+# Robust z-score threshold for residual anomalies (Iglewicz & Hoaglin)
+RESIDUAL_THRESHOLD = 3.5
+
+# 0.6745 = z-score of the 75th percentile; scales MAD to a std estimate
+MAD_TO_Z = 0.6745
+
+ANOMALY_METHODS = ("residual", "zscore", "iqr")
+
+
+def detect_residual(
+    dates: list[datetime.date],
+    values: np.ndarray,
+    threshold: float = RESIDUAL_THRESHOLD,
+    seasonal_period: int | None = None,
+) -> AnomalyReport:
+    """Flag points whose deviation from the smoothed trend is extreme.
+
+    Residuals are taken against the medium robust-LOWESS trend line plus any
+    short seasonal cycle (in log space for strictly positive series), then
+    scored with a robust z-score: 0.6745 * (r - median(r)) / MAD(r). Measuring
+    against the trend means a steadily rising series doesn't get its recent
+    tail flagged, while a genuine spike on top of the trend does.
+    """
+    from app.analysis.smoothing import (
+        remove_short_cycle,
+        short_cycle_period,
+        smooth_values,
+    )
+
+    n = len(values)
+    if n < 3:
+        return AnomalyReport(
+            method="residual",
+            threshold=threshold,
+            anomalies=[],
+            total_points=n,
+            anomaly_count=0,
+        )
+
+    # Positive series (downloads, prices, views) usually grow and vary
+    # multiplicatively; working in log space keeps a steep trend's tail from
+    # looking anomalous just because the numbers got bigger.
+    base = np.log(values) if np.all(values > 0) else values
+    trend = smooth_values(dates, base, "medium", seasonal_period)
+    # Regular short cycles (weekend dips) are expected, not anomalous
+    expected = base - remove_short_cycle(
+        base, short_cycle_period(dates, seasonal_period)
+    )
+    residuals = base - trend - expected
+
+    # Ignore float noise (e.g. a flat line fit to a flat series)
+    tol = 1e-9 * max(1.0, float(np.median(np.abs(residuals))))
+    residuals = np.where(np.abs(residuals) < tol, 0.0, residuals)
+
+    med = float(np.median(residuals))
+    dev = np.abs(residuals - med)
+    mad = float(np.median(dev))
+    if mad > tol:
+        scores = MAD_TO_Z * dev / mad
+    else:
+        # More than half the residuals are identical: fall back to the mean
+        # absolute deviation (scaled to a std estimate for normal data).
+        meanad = float(np.mean(dev))
+        if meanad <= tol:
+            scores = np.zeros(n)
+        else:
+            scores = dev / (1.2533 * meanad)
+
+    anomalies = [
+        AnomalyPoint(
+            date=dates[i],
+            value=float(values[i]),
+            score=float(scores[i]),
+            method="residual",
+        )
+        for i in range(n)
+        if np.isfinite(scores[i]) and scores[i] > threshold
+    ]
+
+    return AnomalyReport(
+        method="residual",
+        threshold=threshold,
+        anomalies=anomalies,
+        total_points=n,
+        anomaly_count=len(anomalies),
+    )
+
+
 def analyze_anomalies(
     ts: TimeSeries,
-    method: str = "zscore",
+    method: str = "residual",
+    seasonal_period: int | None = None,
     **kwargs: float,
 ) -> AnomalyReport:
-    """Run anomaly detection on a TimeSeries."""
+    """Run anomaly detection on a TimeSeries.
+
+    ``method`` is one of ``residual`` (default: robust score of the
+    deviation from the smoothed trend), ``zscore`` or ``iqr``.
+    """
+    if method not in ANOMALY_METHODS:
+        raise ValueError(
+            f"Unknown anomaly detection method: '{method}'. "
+            f"Valid: {list(ANOMALY_METHODS)}"
+        )
     if len(ts.points) == 0:
         return AnomalyReport(
             method=method,
-            threshold=kwargs.get("threshold", kwargs.get("k", 2.5)),
+            threshold=kwargs.get(
+                "threshold",
+                kwargs.get("k", RESIDUAL_THRESHOLD if method == "residual" else 2.5),
+            ),
             anomalies=[],
             total_points=0,
             anomaly_count=0,
@@ -124,9 +225,10 @@ def analyze_anomalies(
     dates = [p.date for p in ts.points]
     values = np.array([p.value for p in ts.points], dtype=np.float64)
 
+    if method == "residual":
+        return detect_residual(
+            dates, values, seasonal_period=seasonal_period, **kwargs
+        )
     if method == "zscore":
         return detect_zscore(dates, values, **kwargs)
-    elif method == "iqr":
-        return detect_iqr(dates, values, **kwargs)
-    else:
-        raise ValueError(f"Unknown anomaly detection method: '{method}'")
+    return detect_iqr(dates, values, **kwargs)

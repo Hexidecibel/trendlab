@@ -26,6 +26,8 @@ interface Props {
   resample?: string
   apply?: string
   anomalyMethod?: string
+  /** Render as a compact icon button (used in the chart header). */
+  iconOnly?: boolean
 }
 
 export function SaveViewButton({
@@ -36,7 +38,8 @@ export function SaveViewButton({
   end,
   resample,
   apply,
-  anomalyMethod = 'zscore',
+  anomalyMethod,
+  iconOnly = false,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -95,15 +98,23 @@ export function SaveViewButton({
 
   return (
     <>
-      <Button
-        variant="outlined"
-        size="small"
-        startIcon={<BookmarkIcon />}
-        onClick={handleOpen}
-        sx={{ textTransform: 'none' }}
-      >
-        Save View
-      </Button>
+      {iconOnly ? (
+        <Tooltip title="Save view">
+          <IconButton size="small" onClick={handleOpen} aria-label="Save view">
+            <BookmarkIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<BookmarkIcon />}
+          onClick={handleOpen}
+          sx={{ textTransform: 'none' }}
+        >
+          Save View
+        </Button>
+      )}
 
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
         <DialogTitle>

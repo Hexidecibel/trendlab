@@ -4,7 +4,7 @@ import datetime
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.logging_config import get_logger
 from app.models.schemas import (
     DataPoint,
@@ -223,7 +223,7 @@ class YahooFinanceAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code == 404:
-                    raise ValueError(f"Symbol '{symbol}' not found") from None
+                    raise EntityNotFoundError(f"Symbol '{symbol}' not found") from None
                 raise
 
         data = response.json()

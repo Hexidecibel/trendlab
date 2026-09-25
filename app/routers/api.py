@@ -21,6 +21,7 @@ from app.data.adapters.csv_upload import (
     parse_csv_content,
     store_upload,
 )
+from app.data.base import EntityNotFoundError
 from app.data.registry import registry
 from app.db import repository as repo
 from app.forecasting.engine import forecast
@@ -287,13 +288,13 @@ async def remove_upload(upload_id: str):
 @router.get("/series", response_model=TimeSeries, tags=["Data"])
 async def get_series(
     request: Request,
-    source: str = Query(..., description="Data source name (e.g. pypi, coingecko)"),
+    source: str = Query(..., description="Data source name (e.g. pypi, crypto)"),
     query: str = Query(..., description="Query string (e.g. package name, coin ID)"),
     start: datetime.date | None = Query(None, description="Start date (YYYY-MM-DD)"),
     end: datetime.date | None = Query(None, description="End date (YYYY-MM-DD)"),
     refresh: bool = Query(False, description="Bypass cache and fetch fresh data"),
     resample: str | None = Query(
-        None, description="Resample frequency: week, month, quarter, season"
+        None, description="Resample frequency: week, month, quarter, year"
     ),
     apply: str | None = Query(
         None,
@@ -334,7 +335,7 @@ async def get_series(
             ts = await _cache.fetch(
                 adapter, query, start=start, end=end, refresh=refresh
             )
-        except ValueError as e:
+        except EntityNotFoundError as e:
             raise friendly_http_error(
                 404,
                 str(e),
@@ -366,11 +367,15 @@ async def analyze_series(
     start: datetime.date | None = Query(None, description="Start date (YYYY-MM-DD)"),
     end: datetime.date | None = Query(None, description="End date (YYYY-MM-DD)"),
     anomaly_method: str = Query(
-        "zscore", description="Anomaly detection method: zscore or iqr"
+        "residual",
+        description=(
+            "Anomaly detection method: residual (robust score of deviation "
+            "from the smoothed trend, default), zscore or iqr"
+        ),
     ),
     refresh: bool = Query(False, description="Bypass cache and fetch fresh data"),
     resample: str | None = Query(
-        None, description="Resample frequency: week, month, quarter, season"
+        None, description="Resample frequency: week, month, quarter, year"
     ),
     apply: str | None = Query(
         None,
@@ -381,10 +386,14 @@ async def analyze_series(
     Analyze a time series for trends, seasonality, and anomalies.
 
     Performs comprehensive statistical analysis including:
-    - **Trend detection**: Direction, momentum, acceleration, moving averages
-    - **Seasonality**: Autocorrelation-based period detection
-    - **Anomalies**: Outlier detection using z-score or IQR method
-    - **Structural breaks**: Regime change detection using PELT algorithm
+    - **Trend**: Smoothed trend presets (robust LOWESS light/medium/heavy plus
+      a fitted line), direction and momentum in % per month from the medium
+      trend's recent slope, and legacy moving averages
+    - **Seasonality**: FFT autocorrelation period detection
+    - **Anomalies**: Robust scores of residuals from the trend (default), or
+      z-score / IQR on raw values
+    - **Structural breaks**: CUSUM change detection, with regimes and
+      plain-English `summary_lines`
     """
     req_id = getattr(request.state, "request_id", None)
     token = current_request_id.set(req_id)
@@ -405,7 +414,7 @@ async def analyze_series(
             ts = await _cache.fetch(
                 adapter, query, start=start, end=end, refresh=refresh
             )
-        except ValueError as e:
+        except EntityNotFoundError as e:
             raise friendly_http_error(
                 404,
                 str(e),
@@ -424,15 +433,7 @@ async def analyze_series(
             ts = apply_transforms(ts, apply)
 
         emit_progress("analyze", 0.6, "Running analysis")
-        try:
-            result = analyze(ts, anomaly_method=anomaly_method)
-        except ValueError as e:
-            raise friendly_http_error(
-                404,
-                str(e),
-                hint="Double-check the spelling, or try searching with /api/lookup.",
-                error_code="ENTITY_NOT_FOUND",
-            )
+        result = analyze(ts, anomaly_method=anomaly_method)
 
         emit_progress("complete", 1.0, "Done")
         return result
@@ -445,12 +446,20 @@ async def forecast_series(
     request: Request,
     source: str = Query(..., description="Data source name"),
     query: str = Query(..., description="Query string (e.g. package name)"),
-    horizon: int = Query(14, ge=1, le=365, description="Forecast horizon in days"),
+    horizon: int = Query(
+        14,
+        ge=1,
+        le=365,
+        description=(
+            "Forecast horizon in periods of the series' own step (days for "
+            "daily data, months for monthly); capped at half the series length"
+        ),
+    ),
     start: datetime.date | None = Query(None, description="Start date (YYYY-MM-DD)"),
     end: datetime.date | None = Query(None, description="End date (YYYY-MM-DD)"),
     refresh: bool = Query(False, description="Bypass cache and fetch fresh data"),
     resample: str | None = Query(
-        None, description="Resample frequency: week, month, quarter, season"
+        None, description="Resample frequency: week, month, quarter, year"
     ),
     apply: str | None = Query(
         None,
@@ -460,13 +469,14 @@ async def forecast_series(
     """
     Generate forecasts using multiple statistical models.
 
-    Runs several forecasting models in parallel and returns predictions
-    with confidence intervals:
-    - **Naive**: Last value baseline
-    - **Drift**: Linear extrapolation
-    - **ETS**: Exponential smoothing (when sufficient data)
-    - **ARIMA**: Auto-regressive integrated moving average
+    Runs several forecasting models and returns predictions with 95%
+    confidence intervals:
+    - **Naive**: Repeats the last value
+    - **Moving average**: Projects the trailing mean flat
+    - **Linear**: Least-squares trend extrapolation
+    - **AutoETS**: Exponential smoothing, seasonal when a period is detected
 
+    Forecast dates follow the series' own step (daily, weekly, monthly, ...).
     Each model is evaluated on a holdout set with MAE, RMSE, and MAPE metrics.
     The response includes a recommended model based on evaluation scores.
     """
@@ -489,7 +499,7 @@ async def forecast_series(
             ts = await _cache.fetch(
                 adapter, query, start=start, end=end, refresh=refresh
             )
-        except ValueError as e:
+        except EntityNotFoundError as e:
             raise friendly_http_error(
                 404,
                 str(e),
@@ -508,15 +518,7 @@ async def forecast_series(
             ts = apply_transforms(ts, apply)
 
         emit_progress("forecast", 0.9, "Running forecast models")
-        try:
-            result = forecast(ts, horizon=horizon)
-        except ValueError as e:
-            raise friendly_http_error(
-                404,
-                str(e),
-                hint="Double-check the spelling, or try searching with /api/lookup.",
-                error_code="ENTITY_NOT_FOUND",
-            )
+        result = forecast(ts, horizon=horizon)
 
         emit_progress("complete", 1.0, "Done")
         return result
@@ -571,7 +573,7 @@ async def save_forecast_snapshot_endpoint(
 
     try:
         ts = await _cache.fetch(adapter, query)
-    except ValueError as e:
+    except EntityNotFoundError as e:
         raise friendly_http_error(
             404,
             str(e),
@@ -659,7 +661,7 @@ async def get_forecast_accuracy(
     # Fetch current (actual) data
     try:
         ts = await _cache.fetch(adapter, query)
-    except ValueError as e:
+    except EntityNotFoundError as e:
         raise friendly_http_error(
             404,
             str(e),
@@ -713,7 +715,7 @@ async def compare_series(request: CompareRequest):
                 end=item.end,
                 refresh=request.refresh,
             )
-        except ValueError as e:
+        except EntityNotFoundError as e:
             raise friendly_http_error(
                 404,
                 str(e),
@@ -857,7 +859,7 @@ async def cohort_comparison(request: CohortRequest):
 
     try:
         all_series = await asyncio.gather(*(fetch_one(q) for q in request.queries))
-    except ValueError as e:
+    except EntityNotFoundError as e:
         raise friendly_http_error(
             404,
             str(e),
@@ -919,7 +921,7 @@ async def correlate_series(request: CorrelateRequest):
                 end=end,
                 refresh=request.refresh,
             )
-        except ValueError as e:
+        except EntityNotFoundError as e:
             raise friendly_http_error(
                 404,
                 str(e),
@@ -988,7 +990,7 @@ async def causal_impact(request: CausalImpactRequest):
             end=request.end,
             refresh=request.refresh,
         )
-    except ValueError as e:
+    except EntityNotFoundError as e:
         raise friendly_http_error(
             404,
             str(e),
@@ -1296,7 +1298,7 @@ async def export_pdf(
 
     try:
         ts = await _cache.fetch(adapter, query, start=start, end=end)
-    except ValueError as e:
+    except EntityNotFoundError as e:
         raise friendly_http_error(
             404,
             str(e),
@@ -1334,12 +1336,24 @@ async def insight_stream(
     start: datetime.date | None = Query(None, description="Start date filter"),
     end: datetime.date | None = Query(None, description="End date filter"),
     prompt_version: str = Query("default", description="Prompt template version"),
+    resample: str | None = Query(
+        None, description="Resample frequency: week, month, quarter, year"
+    ),
+    apply: str | None = Query(
+        None,
+        description="Pipe-delimited transforms: normalize, rolling_avg_Nd, etc.",
+    ),
+    anomaly_method: str = Query(
+        "residual", description="Anomaly detection method: residual, zscore or iqr"
+    ),
 ):
     """
     Stream AI-generated insights via Server-Sent Events (SSE).
 
     Fetches data, runs analysis and forecasting, then streams LLM commentary
     explaining the trends, anomalies, and predictions in plain English.
+    Accepts the same `start`, `end`, `resample` and `apply` parameters as
+    `/analyze`, so the commentary describes exactly the charted data.
 
     **Event types:**
     - `delta`: Incremental text chunk
@@ -1366,7 +1380,7 @@ async def insight_stream(
 
     try:
         ts = await _cache.fetch(adapter, query, start=start, end=end)
-    except ValueError as e:
+    except EntityNotFoundError as e:
         raise friendly_http_error(
             404,
             str(e),
@@ -1374,7 +1388,14 @@ async def insight_stream(
             error_code="ENTITY_NOT_FOUND",
         )
 
-    analysis = analyze(ts)
+    if resample:
+        ts = resample_series(
+            ts, resample, method=adapter.aggregation_method, adapter=adapter
+        )
+    if apply:
+        ts = apply_transforms(ts, apply)
+
+    analysis = analyze(ts, anomaly_method=anomaly_method)
     forecast_result = forecast(ts, horizon=horizon)
 
     async def event_generator():
@@ -1435,8 +1456,8 @@ async def insights_feed(
     sample_queries = [
         ("pypi", "fastapi"),
         ("pypi", "requests"),
-        ("coingecko", "bitcoin"),
-        ("coingecko", "ethereum"),
+        ("crypto", "bitcoin"),
+        ("crypto", "ethereum"),
         ("npm", "react"),
         ("npm", "express"),
     ]
@@ -1510,6 +1531,25 @@ async def natural_query(request: NaturalQueryRequest):
     return result
 
 
+def _describe_view(
+    start: datetime.date | None = None,
+    end: datetime.date | None = None,
+    resample: str | None = None,
+    apply: str | None = None,
+) -> str:
+    """Describe the charted view (range/resample/transforms) for LLM context."""
+    parts = []
+    if start or end:
+        parts.append(f"range {start or 'start'} to {end or 'latest'}")
+    if resample:
+        parts.append(f"resampled by {resample}")
+    if apply:
+        parts.append(f"transforms: {apply}")
+    if not parts:
+        return ""
+    return "Charted view: " + ", ".join(parts) + "\n"
+
+
 @router.post("/insight-followup", tags=["AI"])
 async def insight_followup_stream(request: InsightFollowupRequest):
     """
@@ -1544,9 +1584,11 @@ async def insight_followup_stream(request: InsightFollowupRequest):
 DATA DETAILS:
 - Date range: {ctx.date_range} ({ctx.data_points_count} points)
 - Values: min={ctx.min_value:.2f}, max={ctx.max_value:.2f}, mean={ctx.mean_value:.2f}
-- Trend: {ctx.trend_direction} (momentum: {ctx.trend_momentum:.4f})
+- Trend: {ctx.trend_direction} ({
+            ctx.momentum_label or f"momentum {ctx.trend_momentum:.4f}"
+        })
 - Seasonality: {
-            "Yes, " + str(ctx.seasonality_period) + "-day period"
+            "Yes, " + str(ctx.seasonality_period) + "-point period"
             if ctx.seasonality_detected
             else "None detected"
         }
@@ -1557,6 +1599,10 @@ Recent values: {
             ", ".join(f"{v['date']}: {v['value']:.2f}" for v in ctx.recent_values[-5:])
         }
 """
+        if ctx.summary_lines:
+            data_section += "Key changes:\n" + "".join(
+                f"- {line}\n" for line in ctx.summary_lines[:4]
+            )
         if ctx.anomalies:
             anomaly_dates = ", ".join(
                 a["date"] for a in ctx.anomalies[:5]
@@ -1570,9 +1616,18 @@ Recent values: {
                 for v in ctx.forecast_values[:5]
             )
             data_section += (
-                f"Forecast ({ctx.forecast_horizon}d):"
+                f"Forecast ({ctx.forecast_horizon} periods):"
                 f" {forecast_str}\n"
             )
+
+    view_section = _describe_view(
+        start=request.start,
+        end=request.end,
+        resample=request.resample,
+        apply=request.apply,
+    )
+    if view_section:
+        data_section += view_section
 
     # Fetch event context for anomaly dates
     event_section = ""
@@ -1693,9 +1748,15 @@ async def compare_insight_followup_stream(request: CompareInsightFollowupRequest
 {label}:
 - Date range: {ctx.date_range} ({ctx.data_points_count} points)
 - Values: min={ctx.min_value:.2f}, max={ctx.max_value:.2f}, mean={ctx.mean_value:.2f}
-- Trend: {ctx.trend_direction} (momentum: {ctx.trend_momentum:.4f})
+- Trend: {ctx.trend_direction} ({
+                ctx.momentum_label or f"momentum {ctx.trend_momentum:.4f}"
+            })
 - Anomalies: {ctx.anomaly_count} flagged
 """
+            if ctx.summary_lines:
+                data_section += "".join(
+                    f"  Change: {line}\n" for line in ctx.summary_lines[:3]
+                )
             if ctx.anomalies:
                 anomaly_str = ", ".join(
                     a["date"]
@@ -1704,6 +1765,10 @@ async def compare_insight_followup_stream(request: CompareInsightFollowupRequest
                 data_section += (
                     f"  Anomaly dates: {anomaly_str}\n"
                 )
+
+    view_section = _describe_view(resample=request.resample, apply=request.apply)
+    if view_section:
+        data_section += view_section
 
     # Fetch event context for anomaly dates
     event_section = ""

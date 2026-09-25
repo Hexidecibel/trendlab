@@ -64,3 +64,87 @@ class TestEdgeCases:
         ts = make_constant_series(n=42)
         result = analyze_anomalies(ts)
         assert result.total_points == 42
+
+
+class TestResidualMethod:
+    def _exp_trend(self, n=120, spike_at=None, spike_mult=3.0, seed=7):
+        import datetime
+
+        import numpy as np
+
+        from app.models.schemas import DataPoint, TimeSeries
+
+        rng = np.random.default_rng(seed)
+        t = np.arange(n)
+        values = 100 * np.exp(0.035 * t) * (1 + rng.normal(0, 0.02, n))
+        if spike_at is not None:
+            values[spike_at] *= spike_mult
+        start = datetime.date(2024, 1, 1)
+        return TimeSeries(
+            source="test",
+            query="exp",
+            points=[
+                DataPoint(date=start + datetime.timedelta(days=int(i)), value=float(v))
+                for i, v in zip(t, values)
+            ],
+        )
+
+    def test_default_method_is_residual(self):
+        ts = make_series_with_outliers(n=60, outlier_indices=[30])
+        result = analyze_anomalies(ts)
+        assert result.method == "residual"
+
+    def test_catches_spike_on_trending_series(self):
+        ts = self._exp_trend(spike_at=70)
+        result = analyze_anomalies(ts, method="residual")
+        flagged = {a.date for a in result.anomalies}
+        assert ts.points[70].date in flagged
+
+    def test_does_not_flag_trend_tail(self):
+        ts = self._exp_trend(spike_at=70)
+        result = analyze_anomalies(ts, method="residual")
+        tail = {p.date for p in ts.points[-20:]}
+        assert not (tail & {a.date for a in result.anomalies})
+        # Raw z-score, by contrast, mistakes the exponential tail for anomalies
+        z = analyze_anomalies(ts, method="zscore")
+        assert tail & {a.date for a in z.anomalies}
+
+    def test_flat_series_spike(self):
+        ts = make_series_with_outliers(n=60, outlier_indices=[25])
+        result = analyze_anomalies(ts, method="residual")
+        assert [a.date for a in result.anomalies] == [ts.points[25].date]
+
+    def test_constant_series_no_anomalies(self):
+        ts = make_constant_series(n=60)
+        result = analyze_anomalies(ts, method="residual")
+        assert result.anomaly_count == 0
+
+    def test_short_series(self):
+        ts = make_series_with_outliers(n=2, outlier_indices=[1])
+        result = analyze_anomalies(ts, method="residual")
+        assert result.anomaly_count == 0
+        assert result.total_points == 2
+
+    def test_weekly_cycle_is_not_anomalous(self):
+        import datetime
+
+        import numpy as np
+
+        from app.models.schemas import DataPoint, TimeSeries
+
+        rng = np.random.default_rng(11)
+        n = 140
+        t = np.arange(n)
+        values = 1000 * np.where(t % 7 >= 5, 0.6, 1.0) * (1 + rng.normal(0, 0.03, n))
+        values[90] *= 2.5
+        start = datetime.date(2024, 1, 1)
+        ts = TimeSeries(
+            source="test",
+            query="weekly",
+            points=[
+                DataPoint(date=start + datetime.timedelta(days=int(i)), value=float(v))
+                for i, v in zip(t, values)
+            ],
+        )
+        result = analyze_anomalies(ts, method="residual", seasonal_period=7)
+        assert [a.date for a in result.anomalies] == [ts.points[90].date]

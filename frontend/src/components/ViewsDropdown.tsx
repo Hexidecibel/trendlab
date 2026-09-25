@@ -82,9 +82,13 @@ export function ViewsDropdown({ onLoadView }: Props) {
         size="small"
         startIcon={<BookmarksIcon />}
         onClick={handleClick}
-        sx={{ textTransform: 'none' }}
+        sx={{ textTransform: 'none', minWidth: 0, '& .MuiButton-startIcon': { mr: { xs: views.length > 0 ? 0.5 : 0, sm: 1 } } }}
+        aria-label="My saved views"
       >
-        My Views {views.length > 0 && `(${views.length})`}
+        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' }, mr: 0.5 }}>
+          My Views
+        </Box>
+        {views.length > 0 && `(${views.length})`}
       </Button>
 
       <Menu

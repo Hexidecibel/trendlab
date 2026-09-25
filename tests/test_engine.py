@@ -42,7 +42,23 @@ class TestAnalyzeOrchestrator:
         result = analyze(ts, anomaly_method="iqr")
         assert result.anomalies.method == "iqr"
 
-    def test_default_anomaly_method_is_zscore(self):
+    def test_default_anomaly_method_is_residual(self):
         ts = make_linear_series(n=60)
         result = analyze(ts)
+        assert result.anomalies.method == "residual"
+
+    def test_zscore_still_selectable(self):
+        ts = make_linear_series(n=60)
+        result = analyze(ts, anomaly_method="zscore")
         assert result.anomalies.method == "zscore"
+
+    def test_smoothed_presets_and_summary_present(self):
+        ts = make_linear_series(n=60, slope=2.0)
+        result = analyze(ts)
+        sm = result.trend.smoothed
+        assert sm is not None
+        for preset in (sm.light, sm.medium, sm.heavy, sm.line):
+            assert len(preset) == 60
+        assert result.trend.momentum_label.endswith("/ month")
+        assert isinstance(result.summary_lines, list)
+        assert 1 <= len(result.summary_lines) <= 4

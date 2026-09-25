@@ -5,6 +5,7 @@ import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.data.base import EntityNotFoundError
 from app.main import app
 from app.models.schemas import DataPoint, TimeSeries
 
@@ -42,11 +43,13 @@ class TestErrorResponseFormat:
 
     @pytest.mark.asyncio
     async def test_adapter_not_found_returns_404(self, client: AsyncClient):
-        """ValueError from adapter (entity not found) stays 404."""
+        """EntityNotFoundError from an adapter maps to 404."""
         with patch("app.routers.api.registry.get") as mock_get:
             mock_adapter = AsyncMock()
             mock_adapter.name = "pypi"
-            mock_adapter.fetch.side_effect = ValueError("Package 'nope' not found")
+            mock_adapter.fetch.side_effect = EntityNotFoundError(
+                "Package 'nope' not found"
+            )
             mock_get.return_value = mock_adapter
 
             response = await client.get(
@@ -57,6 +60,30 @@ class TestErrorResponseFormat:
         data = response.json()
         assert_error_shape(data)
         assert data["error_code"] == "ENTITY_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("endpoint", ["/api/series", "/api/analyze"])
+    async def test_other_adapter_value_error_returns_422(
+        self, client: AsyncClient, endpoint: str
+    ):
+        """A plain ValueError (bad format, rate limit...) is a 422, not a 404,
+        and keeps its real message."""
+        with patch("app.routers.api.registry.get") as mock_get:
+            mock_adapter = AsyncMock()
+            mock_adapter.name = "pypi"
+            mock_adapter.fetch.side_effect = ValueError(
+                "GitHub API rate limit exceeded"
+            )
+            mock_get.return_value = mock_adapter
+
+            response = await client.get(
+                endpoint, params={"source": "pypi", "query": "x"}
+            )
+
+        assert response.status_code == 422
+        data = response.json()
+        assert_error_shape(data)
+        assert "rate limit exceeded" in data["detail"]
 
     @pytest.mark.asyncio
     async def test_invalid_resample_returns_422(self, client: AsyncClient):

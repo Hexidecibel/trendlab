@@ -4,7 +4,7 @@ import datetime
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.logging_config import get_logger
 from app.models.schemas import (
     DataPoint,
@@ -236,7 +236,7 @@ class WikipediaAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code == 404:
-                    raise ValueError(
+                    raise EntityNotFoundError(
                         f"Article '{self._denormalize_title(article)}' not found "
                         f"on {project}"
                     ) from None

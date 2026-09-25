@@ -243,8 +243,8 @@ RULES:
    "vs", "versus", "and" between two entities, "side by side"), return a compare
    response with 2-3 items instead of a single query. Max 3 items.
 9. RESAMPLE / TRANSFORM: If the user mentions aggregation (weekly, monthly,
-   quarterly, seasonal, yearly/annual), set "resample" to \
-"week", "month", "quarter", "season", or "year".
+   quarterly, yearly/annual), set "resample" to \
+"week", "month", "quarter", or "year".
    If they mention transforms (normalize, rolling average, percentage change),
    set "apply" to a pipe-delimited string (e.g. "rolling_avg_7d|normalize").
    Default both to null.

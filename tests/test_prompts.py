@@ -145,6 +145,26 @@ class TestFormatAnalysisContext:
         result = format_analysis_context(_make_analysis(), _make_forecast())
         assert "linear" in result
 
+    def test_contains_summary_lines_and_momentum_label(self):
+        from app.ai.prompts import format_analysis_context
+
+        analysis = _make_analysis()
+        analysis.summary_lines = [
+            "Growth slowed from +8%/mo to +2%/mo after Mar 3, 2026"
+        ]
+        analysis.trend.momentum_label = "+3.2% / month"
+        analysis.trend.momentum_pct_per_month = 3.2
+        result = format_analysis_context(analysis, _make_forecast())
+        assert "Key changes:" in result
+        assert "Growth slowed from +8%/mo to +2%/mo after Mar 3, 2026" in result
+        assert "+3.2% / month" in result
+
+    def test_no_summary_section_when_empty(self):
+        from app.ai.prompts import format_analysis_context
+
+        result = format_analysis_context(_make_analysis(), _make_forecast())
+        assert "Key changes:" not in result
+
 
 class TestGetPrompt:
     def test_default_contains_context_placeholder(self):

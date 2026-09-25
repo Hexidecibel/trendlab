@@ -11,7 +11,24 @@ import Link from '@mui/material/Link'
 import Typography from '@mui/material/Typography'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { fetchEventContext } from '../api/client'
-import type { EventContext, TrendAnalysis } from '../api/types'
+import type { EventContext, TrendAnalysis, TrendSignal } from '../api/types'
+
+/** Readable momentum: backend label if present, else a formatted percent per step. */
+function formatMomentum(trend: TrendSignal): string {
+  if (trend.momentum_label) return trend.momentum_label
+  if (trend.momentum_pct_per_month != null && Number.isFinite(trend.momentum_pct_per_month)) {
+    const v = trend.momentum_pct_per_month
+    return `${v >= 0 ? '+' : ''}${v.toFixed(1)}% / month`
+  }
+  const pct = trend.momentum * 100
+  if (!Number.isFinite(pct)) return 'n/a'
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% / step`
+}
+
+function describeAcceleration(acceleration: number): string | null {
+  if (!Number.isFinite(acceleration) || acceleration === 0) return null
+  return acceleration > 0 ? 'accelerating' : 'decelerating'
+}
 
 interface Props {
   analysis: TrendAnalysis
@@ -27,6 +44,9 @@ const DIRECTION_COLORS: Record<string, 'success' | 'error' | 'default'> = {
 export function AnalysisPanel({ analysis, compact = false }: Props) {
   const { trend, seasonality, anomalies, structural_breaks } = analysis
   const chipColor = DIRECTION_COLORS[trend.direction] || 'default'
+  const momentumText = formatMomentum(trend)
+  const accelText = describeAcceleration(trend.acceleration)
+  const summaryLines = (analysis.summary_lines ?? []).filter((l) => l && l.trim())
 
   const [eventContexts, setEventContexts] = useState<EventContext[]>([])
   const [contextLoading, setContextLoading] = useState(false)
@@ -65,7 +85,7 @@ export function AnalysisPanel({ analysis, compact = false }: Props) {
             sx={{ mr: 1 }}
           />
           <Typography variant="caption" color="text.secondary">
-            Momentum: {trend.momentum.toFixed(4)}
+            Momentum: {momentumText}
           </Typography>
           <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
             {seasonality.detected
@@ -80,20 +100,37 @@ export function AnalysisPanel({ analysis, compact = false }: Props) {
   return (
     <Card>
       <CardContent>
+        {summaryLines.length > 0 && (
+          <>
+            <Typography variant="subtitle2" gutterBottom>
+              What changed
+            </Typography>
+            <Box component="ul" sx={{ m: 0, mb: 1.5, pl: 2.5 }}>
+              {summaryLines.slice(0, 5).map((line, i) => (
+                <Typography key={i} component="li" variant="body2" sx={{ mb: 0.5 }}>
+                  {line}
+                </Typography>
+              ))}
+            </Box>
+            <Divider sx={{ mb: 1.5 }} />
+          </>
+        )}
+
         <Typography variant="subtitle2" gutterBottom>
           Trend Analysis
         </Typography>
 
-        <Chip
-          label={trend.direction.toUpperCase()}
-          color={chipColor}
-          size="small"
-          sx={{ mb: 1 }}
-        />
-        <Typography variant="caption" display="block" color="text.secondary">
-          Momentum: {trend.momentum.toFixed(4)} | Acceleration:{' '}
-          {trend.acceleration.toFixed(4)}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+          <Chip label={trend.direction.toUpperCase()} color={chipColor} size="small" />
+          <Typography variant="body2" fontWeight={600}>
+            {momentumText}
+          </Typography>
+          {accelText && (
+            <Typography variant="caption" color="text.secondary">
+              · {accelText}
+            </Typography>
+          )}
+        </Box>
 
         <Divider sx={{ my: 1.5 }} />
 

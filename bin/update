@@ -23,4 +23,4 @@ docker run -d --name trendlab \
   trendlab
 
 echo "Done! TrendLab is running at http://localhost:9393"
-docker logs -f trendlab --tail 20
+docker logs trendlab --tail 20

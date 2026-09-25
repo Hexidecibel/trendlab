@@ -3,7 +3,7 @@ from collections import Counter
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.models.schemas import DataPoint, FormField, TimeSeries
 
 GITHUB_API_URL = "https://api.github.com/repos/{owner_repo}/stargazers"
@@ -53,7 +53,7 @@ class GitHubStarsAdapter(DataAdapter):
                     response.raise_for_status()
                 except httpx.HTTPStatusError:
                     if response.status_code == 404:
-                        raise ValueError(
+                        raise EntityNotFoundError(
                             f"Repository '{query}' not found on GitHub"
                         ) from None
                     if response.status_code == 403:

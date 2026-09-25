@@ -5,7 +5,7 @@ import datetime
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.logging_config import get_logger
 from app.models.schemas import (
     DataPoint,
@@ -242,7 +242,9 @@ class ASAAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
-                    raise ValueError(f"League '{league}' not found on ASA") from None
+                    raise EntityNotFoundError(
+                        f"League '{league}' not found on ASA"
+                    ) from None
                 raise
 
         teams = response.json()
@@ -361,7 +363,7 @@ class ASAAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
-                    raise ValueError(
+                    raise EntityNotFoundError(
                         f"Games not found for team '{team_id}' in {league}"
                     ) from None
                 raise
@@ -413,7 +415,7 @@ class ASAAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
-                    raise ValueError(
+                    raise EntityNotFoundError(
                         f"Metric data not found for team '{team_id}' in {league}"
                     ) from None
                 raise

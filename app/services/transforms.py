@@ -105,7 +105,8 @@ def _resolve_transform(name: str):
         window = int(m.group(1))
         return lambda ts: _rolling_avg(ts, window)
 
-    raise ValueError(f"Unknown transform '{name}'. Valid: {sorted(_SIMPLE_TRANSFORMS)}")
+    valid = sorted(_SIMPLE_TRANSFORMS) + ["rolling_avg_<N>d (e.g. rolling_avg_7d)"]
+    raise ValueError(f"Unknown transform '{name}'. Valid: {valid}")
 
 
 def apply_transforms(ts: TimeSeries, apply_str: str) -> TimeSeries:

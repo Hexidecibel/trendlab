@@ -159,3 +159,69 @@ class TestInsightEndpoint:
             )
 
         assert response.status_code == 200
+
+
+class TestInsightForwardsView:
+    @pytest.mark.asyncio
+    async def test_forwards_range_resample_and_apply(self, client: AsyncClient):
+        with (
+            patch("app.routers.api.registry.get") as mock_get,
+            patch("app.routers.api.settings") as mock_settings,
+            patch("app.routers.api.summarize_stream") as mock_stream,
+        ):
+            mock_settings.anthropic_api_key = "sk-test"
+            mock_adapter = AsyncMock()
+            mock_adapter.name = "pypi-view-test"
+            mock_adapter.aggregation_method = "sum"
+            mock_adapter.fetch.return_value = FAKE_TIMESERIES
+            mock_get.return_value = mock_adapter
+
+            async def fake_stream(*args, **kwargs):
+                yield "ok"
+
+            mock_stream.return_value = fake_stream()
+
+            response = await client.get(
+                "/api/insight",
+                params={
+                    "source": "pypi",
+                    "query": "fastapi",
+                    "start": "2024-01-01",
+                    "end": "2024-02-29",
+                    "resample": "month",
+                    "apply": "normalize",
+                },
+            )
+
+        assert response.status_code == 200
+        mock_adapter.fetch.assert_called_once_with(
+            "fastapi",
+            start=datetime.date(2024, 1, 1),
+            end=datetime.date(2024, 2, 29),
+        )
+        analysis = mock_stream.call_args.args[0]
+        # The AI sees the charted (monthly, normalized) data: 2 month buckets
+        assert analysis.series_length == 2
+        forecast = mock_stream.call_args.args[1]
+        assert forecast.horizon == 1
+
+    @pytest.mark.asyncio
+    async def test_bad_resample_is_422(self, client: AsyncClient):
+        with (
+            patch("app.routers.api.registry.get") as mock_get,
+            patch("app.routers.api.settings") as mock_settings,
+        ):
+            mock_settings.anthropic_api_key = "sk-test"
+            mock_adapter = AsyncMock()
+            mock_adapter.name = "pypi-view-test2"
+            mock_adapter.fetch.return_value = FAKE_TIMESERIES
+            mock_adapter.custom_resample_periods = lambda: []
+            mock_get.return_value = mock_adapter
+
+            response = await client.get(
+                "/api/insight",
+                params={"source": "pypi", "query": "fastapi", "resample": "bogus"},
+            )
+
+        assert response.status_code == 422
+        assert "Unknown resample frequency" in response.json()["detail"]

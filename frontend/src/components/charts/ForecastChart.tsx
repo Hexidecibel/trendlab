@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
+import FormControlLabel from '@mui/material/FormControlLabel'
+import IconButton from '@mui/material/IconButton'
+import Switch from '@mui/material/Switch'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
-import type { ChartJS } from 'chart.js'
+import type { Chart as ChartJS } from 'chart.js'
 import { fetchEventContext } from '../../api/client'
 import type { EventContext, TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
 
@@ -18,7 +22,6 @@ function getTimeUnit(resample?: string): TimeUnit {
     case 'week': return 'week'
     case 'month': return 'month'
     case 'quarter': return 'quarter'
-    case 'season': return 'quarter'
     case 'year': return 'year'
     // Custom resample periods - use year for seasonal aggregations
     case 'mls_season': return 'year'
@@ -40,16 +43,20 @@ interface Props {
   forecast: ForecastComparison
   selectedModel: string
   analysis?: TrendAnalysis | null
-  showBreaks?: boolean
-  showAnomalies?: boolean
-  showRegimes?: boolean
+  /** Legend label for the forecast line, e.g. "Forecast (auto · ets)". */
+  forecastLabel?: string
+  /** One toggle for regimes (bands), breaks (lines) and anomalies (points). */
+  showAnnotations: boolean
+  onShowAnnotationsChange: (show: boolean) => void
   resample?: string
+  /** Extra header actions (e.g. Save View icon button). */
+  actions?: ReactNode
 }
 
 const REGIME_COLORS: Record<string, string> = {
-  rising: 'rgba(34, 197, 94, 0.08)',
-  falling: 'rgba(239, 68, 68, 0.08)',
-  stable: 'rgba(156, 163, 175, 0.08)',
+  rising: 'rgba(34, 197, 94, 0.07)',
+  falling: 'rgba(239, 68, 68, 0.07)',
+  stable: 'rgba(156, 163, 175, 0.05)',
 }
 
 export function ForecastChart({
@@ -57,12 +64,16 @@ export function ForecastChart({
   forecast,
   selectedModel,
   analysis,
-  showBreaks = true,
-  showAnomalies = true,
-  showRegimes = true,
+  forecastLabel,
+  showAnnotations,
+  onShowAnnotationsChange,
   resample,
+  actions,
 }: Props) {
-  const chartRef = useRef<ChartJS<'line'>>(null)
+  const showBreaks = showAnnotations
+  const showAnomalies = showAnnotations
+  const showRegimes = showAnnotations
+  const chartRef = useRef<ChartJS<'line', { x: string; y: number }[]>>(null)
   const [eventMap, setEventMap] = useState<Record<string, EventContext>>({})
 
   // Fetch event context for anomaly dates
@@ -128,7 +139,7 @@ export function ForecastChart({
         borderWidth: 2,
       },
       {
-        label: `Forecast (${selectedModel})`,
+        label: forecastLabel || `Forecast (${selectedModel})`,
         data: forecastData,
         borderColor: '#f97316',
         backgroundColor: '#f97316',
@@ -165,16 +176,24 @@ export function ForecastChart({
         type: 'line',
         xMin: brk.date,
         xMax: brk.date,
-        borderColor: 'rgba(239, 68, 68, 0.7)',
-        borderWidth: 2,
+        borderColor: 'rgba(239, 68, 68, 0.55)',
+        borderWidth: 1.5,
         borderDash: [6, 4],
         label: {
-          display: true,
-          content: `Break (${brk.method})`,
+          display: false,
+          content: `Break · ${brk.date}`,
           position: 'start',
-          backgroundColor: 'rgba(239, 68, 68, 0.8)',
+          backgroundColor: 'rgba(30, 30, 30, 0.9)',
           color: '#fff',
           font: { size: 10 },
+        },
+        enter({ element }: { element: { label: { options: { display: boolean } } } }) {
+          element.label.options.display = true
+          return true
+        },
+        leave({ element }: { element: { label: { options: { display: boolean } } } }) {
+          element.label.options.display = false
+          return true
         },
       }
     })
@@ -222,13 +241,7 @@ export function ForecastChart({
         xMax: regime.end_date,
         backgroundColor: REGIME_COLORS[regime.label] || REGIME_COLORS.stable,
         borderWidth: 0,
-        label: {
-          display: true,
-          content: regime.label,
-          position: { x: 'center', y: 'start' },
-          color: 'rgba(100, 100, 100, 0.6)',
-          font: { size: 9 },
-        },
+        drawTime: 'beforeDatasetsDraw',
       }
     })
   }
@@ -269,39 +282,53 @@ export function ForecastChart({
     },
   }
 
+  const iconSx = { p: 0.75 }
+
   return (
     <Card>
       <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="subtitle2">
-            Time Series & Forecast
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<DownloadIcon />}
-              onClick={handleDownloadPng}
-              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
-            >
-              PNG
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<ZoomOutMapIcon />}
-              onClick={handleResetZoom}
-              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
-            >
-              Reset Zoom
-            </Button>
+        <Box
+          sx={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 1,
+            mb: 1,
+          }}
+        >
+          <Typography variant="subtitle2">Time Series & Forecast</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <FormControlLabel
+              sx={{ mr: 0.5 }}
+              control={
+                <Switch
+                  size="small"
+                  checked={showAnnotations}
+                  onChange={(e) => onShowAnnotationsChange(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Annotations</Typography>}
+            />
+            <Tooltip title="Download PNG">
+              <IconButton size="small" sx={iconSx} onClick={handleDownloadPng} aria-label="Download PNG">
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Reset zoom">
+              <IconButton size="small" sx={iconSx} onClick={handleResetZoom} aria-label="Reset zoom">
+                <ZoomOutMapIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            {actions}
           </Box>
         </Box>
-        <Box sx={{ height: 320 }}>
+        <Box sx={{ height: { xs: 260, sm: 320 } }}>
           <Line ref={chartRef} data={data} options={options} />
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-          Tip: Drag to select a region to zoom in
+          Tip: drag across the chart to zoom in
+          {showAnnotations && ' · shaded bands = regimes, dashed lines = breaks, red dots = anomalies'}
         </Typography>
       </CardContent>
     </Card>

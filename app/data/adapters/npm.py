@@ -3,7 +3,7 @@ from collections import defaultdict
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.models.schemas import DataPoint, FormField, TimeSeries
 
 NPM_DOWNLOADS_URL = "https://api.npmjs.org/downloads/range/{start}:{end}/{package}"
@@ -48,7 +48,9 @@ class NpmAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code == 404:
-                    raise ValueError(f"Package '{query}' not found on npm") from None
+                    raise EntityNotFoundError(
+                        f"Package '{query}' not found on npm"
+                    ) from None
                 raise
 
         data = response.json()

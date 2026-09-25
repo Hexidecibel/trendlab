@@ -103,8 +103,10 @@ async def generate_headline(
 Write ONE short sentence (under 100 characters) summarizing the trend.
 Be specific with direction and momentum. No quotes or markdown."""
 
+    changes = "; ".join(analysis.summary_lines[:2]) or "none notable"
     user_prompt = f"""Series: {label}
-Trend: {analysis.trend.direction} (momentum: {analysis.trend.momentum:.4f})
+Trend: {analysis.trend.direction} ({analysis.trend.momentum_label})
+Key changes: {changes}
 Anomalies: {analysis.anomalies.anomaly_count}
 Breaks: {len(analysis.structural_breaks)}"""
 
@@ -128,14 +130,18 @@ async def summarize_compare_stream(
     for analysis, label in zip(analyses, labels):
         desc = f"""
 **{label}**:
-- Trend: {analysis.trend.direction} (momentum: {analysis.trend.momentum:.4f})
+- Trend: {analysis.trend.direction} ({analysis.trend.momentum_label})
 - Seasonality: {
-    'Yes, ' + str(analysis.seasonality.period_days) + '-day period'
+    'Yes, ' + str(analysis.seasonality.period_days) + '-point period'
     if analysis.seasonality.detected else 'None detected'
 }
 - Anomalies: {analysis.anomalies.anomaly_count} flagged
 - Structural breaks: {len(analysis.structural_breaks)}
 """
+        if analysis.summary_lines:
+            desc += "".join(
+                f"- Change: {line}\n" for line in analysis.summary_lines[:3]
+            )
         series_descriptions.append(desc)
 
     system_prompt = """You are a data analyst comparing time series trends.

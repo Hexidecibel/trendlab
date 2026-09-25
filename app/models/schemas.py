@@ -78,12 +78,33 @@ class MovingAverage(BaseModel):
     values: list[DataPoint]
 
 
+class SmoothedSeries(BaseModel):
+    """Trend-line presets computed from the raw series.
+
+    light/medium/heavy are robust LOWESS smooths with windows of roughly
+    1 week / 1 month / 1 quarter; ``line`` is a least-squares fit (linear, or
+    quadratic when it fits clearly better).
+    """
+
+    light: list[DataPoint] = Field(default_factory=list)
+    medium: list[DataPoint] = Field(default_factory=list)
+    heavy: list[DataPoint] = Field(default_factory=list)
+    line: list[DataPoint] = Field(default_factory=list)
+    # Linear-fit slope relative to the fitted mean level, in % per month
+    slope_pct_per_month: float | None = None
+
+
 class TrendSignal(BaseModel):
     direction: str  # "rising", "falling", "stable"
+    # Recent slope of the medium-smoothed trend, as a fraction per month
+    # (0.032 == +3.2% / month)
     momentum: float
     acceleration: float
     moving_averages: list[MovingAverage]
     momentum_series: list[DataPoint]
+    smoothed: SmoothedSeries | None = None
+    momentum_label: str = "flat"  # e.g. "+3.2% / month" or "flat"
+    momentum_pct_per_month: float | None = None
 
 
 class SeasonalityResult(BaseModel):
@@ -122,6 +143,8 @@ class Regime(BaseModel):
     mean_value: float
     mean_return: float
     volatility: float
+    # Linear slope of the regime relative to its mean level, in % per month
+    slope_pct_per_month: float | None = None
 
 
 class TrendAnalysis(BaseModel):
@@ -133,6 +156,8 @@ class TrendAnalysis(BaseModel):
     anomalies: AnomalyReport
     structural_breaks: list[StructuralBreak]
     regimes: list[Regime] = []
+    # Plain-English change summaries, most significant first (max 4)
+    summary_lines: list[str] = Field(default_factory=list)
 
 
 # --- Phase 4: Forecasting models ---
@@ -356,7 +381,7 @@ class SaveViewRequest(BaseModel):
     end: datetime.date | None = None
     resample: str | None = None
     apply: str | None = None
-    anomaly_method: str = "zscore"
+    anomaly_method: str = "residual"
 
 
 class SavedViewResponse(BaseModel):
@@ -415,6 +440,10 @@ class DataContext(BaseModel):
         None  # [{date, value, lower_ci, upper_ci}, ...]
     )
 
+    # Readable trend (optional, from TrendAnalysis)
+    momentum_label: str | None = None
+    summary_lines: list[str] = Field(default_factory=list)
+
 
 class InsightFollowupRequest(BaseModel):
     source: str
@@ -422,6 +451,11 @@ class InsightFollowupRequest(BaseModel):
     messages: list[ChatMessage]  # Conversation history
     context_summary: str  # The initial AI insight summary
     data_context: DataContext | None = None  # Rich data context
+    # The charted window/view, so the follow-up describes the same data
+    start: datetime.date | None = None
+    end: datetime.date | None = None
+    resample: str | None = None
+    apply: str | None = None
 
 
 class CompareInsightFollowupRequest(BaseModel):
@@ -429,6 +463,8 @@ class CompareInsightFollowupRequest(BaseModel):
     messages: list[ChatMessage]  # Conversation history
     context_summary: str  # The initial AI comparison summary
     data_contexts: list[DataContext] | None = None  # Rich context for each series
+    resample: str | None = None
+    apply: str | None = None
 
 
 # --- Causal Impact models ---

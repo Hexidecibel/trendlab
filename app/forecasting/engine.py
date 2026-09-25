@@ -1,15 +1,18 @@
 """Forecast orchestrator: run all models, evaluate, recommend best."""
 
+import functools
 import time
 
 import numpy as np
 
+from app.analysis.seasonality import analyze_seasonality
 from app.forecasting.baseline import (
     forecast_linear,
     forecast_moving_average,
     forecast_naive,
 )
 from app.forecasting.evaluation import backtest
+from app.forecasting.frequency import cap_horizon, infer_step
 from app.forecasting.statistical import forecast_autoets
 from app.logging_config import get_logger
 from app.models.schemas import (
@@ -22,15 +25,33 @@ from app.models.schemas import (
 logger = get_logger(__name__)
 
 
-def forecast(ts: TimeSeries, horizon: int = 14) -> ForecastComparison:
-    """Run all forecast models, backtest each, and recommend the best."""
+def forecast(
+    ts: TimeSeries,
+    horizon: int = 14,
+    seasonal_period: int | None = None,
+) -> ForecastComparison:
+    """Run all forecast models, backtest each, and recommend the best.
+
+    ``horizon`` is a number of periods at the series' own step (days for
+    daily data, months for monthly data, ...), capped at half the series
+    length. ``seasonal_period`` (in points) feeds AutoETS; it is detected
+    from the series when not given.
+    """
     if len(ts.points) == 0:
         raise ValueError("Cannot forecast empty series")
+
+    horizon = cap_horizon(horizon, len(ts.points))
+    if seasonal_period is None:
+        seasonality = analyze_seasonality(ts)
+        seasonal_period = seasonality.period_days if seasonality.detected else None
 
     log = logger.with_fields(
         source=ts.source, query=ts.query, series_length=len(ts.points), horizon=horizon
     )
-    log.info("Starting forecast")
+    log.with_fields(
+        step=infer_step([p.date for p in ts.points]).label,
+        seasonal_period=seasonal_period,
+    ).info("Starting forecast")
     total_start = time.perf_counter()
 
     dates = [p.date for p in ts.points]
@@ -41,16 +62,17 @@ def forecast(ts: TimeSeries, horizon: int = 14) -> ForecastComparison:
         ("naive", forecast_naive, {}),
         ("moving_average", forecast_moving_average, {}),
         ("linear", forecast_linear, {}),
-        ("autoets", forecast_autoets, {}),
+        ("autoets", forecast_autoets, {"season_length": seasonal_period}),
     ]
 
     forecasts: list[ModelForecast] = []
     evaluations: list[ModelEvaluation] = []
 
-    for model_name, fn, kwargs in model_fns:
+    for model_name, base_fn, kwargs in model_fns:
+        fn = functools.partial(base_fn, **kwargs) if kwargs else base_fn
         model_start = time.perf_counter()
         try:
-            model_forecast = fn(dates, values, horizon, **kwargs)
+            model_forecast = fn(dates, values, horizon)
         except Exception:
             log.with_fields(model=model_name).warning(
                 "Model failed during forecast", exc_info=True

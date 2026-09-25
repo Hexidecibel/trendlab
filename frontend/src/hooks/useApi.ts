@@ -45,7 +45,7 @@ export function useApi() {
       apply?: string,
       anomalyMethod?: string,
       refresh?: boolean,
-    ) => {
+    ): Promise<TimeSeries | null> => {
       const rid = generateRequestId()
       setRequestId(rid)
       setLoading(true)
@@ -63,8 +63,10 @@ export function useApi() {
         setSeries(s)
         setAnalysis(a)
         setForecast(f)
+        return s
       } catch (err) {
         setError(err instanceof ApiError ? err : err instanceof Error ? err.message : String(err))
+        return null
       } finally {
         setLoading(false)
         setRequestId(null)

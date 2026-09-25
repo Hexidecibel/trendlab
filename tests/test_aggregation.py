@@ -78,8 +78,8 @@ class TestQuarterAggregation:
         assert result.points[1].value == pytest.approx(35.0)  # mean(30, 40)
 
 
-class TestSeasonAggregation:
-    def test_season_groups_by_year(self):
+class TestLegacySeasonAlias:
+    def test_season_is_treated_as_year(self):
         points = [
             DataPoint(date=datetime.date(2024, 6, 1), value=10.0),
             DataPoint(date=datetime.date(2024, 12, 1), value=20.0),
@@ -92,6 +92,25 @@ class TestSeasonAggregation:
         assert result.points[0].value == pytest.approx(15.0)
         assert result.points[1].date == datetime.date(2025, 1, 1)
         assert result.points[1].value == pytest.approx(30.0)
+        assert result.metadata["resample"] == "year"
+
+    def test_seasonal_alias_is_treated_as_year(self):
+        points = [
+            DataPoint(date=datetime.date(2024, 6, 1), value=10.0),
+            DataPoint(date=datetime.date(2025, 3, 1), value=30.0),
+        ]
+        ts = TimeSeries(source="test", query="test", points=points)
+        result = resample_series(ts, "seasonal", method="sum")
+        assert [p.date for p in result.points] == [
+            datetime.date(2024, 1, 1),
+            datetime.date(2025, 1, 1),
+        ]
+
+    def test_season_not_listed_as_valid(self):
+        ts = TimeSeries(source="test", query="test", points=[])
+        with pytest.raises(ValueError) as exc:
+            resample_series(ts, "biweekly")
+        assert "season'" not in str(exc.value)
 
 
 class TestNoOp:

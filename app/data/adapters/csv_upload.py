@@ -4,7 +4,7 @@ import io
 import uuid
 from dataclasses import dataclass
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.models.schemas import DataPoint, FormField, LookupItem, TimeSeries
 
 # In-memory storage for uploaded CSVs
@@ -177,7 +177,9 @@ class CSVUploadAdapter(DataAdapter):
     ) -> TimeSeries:
         upload = get_upload(query)
         if upload is None:
-            raise ValueError(f"Upload '{query}' not found. Please upload a CSV first.")
+            raise EntityNotFoundError(
+                f"Upload '{query}' not found. Please upload a CSV first."
+            )
 
         # Clone the series and apply date filters
         points = upload.series.points

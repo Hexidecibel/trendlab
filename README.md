@@ -57,11 +57,11 @@ cd trendlab
 cp .env.example .env
 # Edit .env to add your API keys (optional)
 
-# Start with docker-compose
-docker-compose up --build
+# Build and run the container (maps host port 9393 -> container 8000)
+bin/update
 ```
 
-Visit http://localhost:8000
+Visit http://localhost:9393
 
 ### Local Development
 

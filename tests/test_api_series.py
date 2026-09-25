@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.data.base import EntityNotFoundError
 from app.models.schemas import DataPoint, TimeSeries
 
 FAKE_TIMESERIES = TimeSeries(
@@ -90,10 +91,10 @@ class TestSeriesEndpoint:
             )
 
     @pytest.mark.asyncio
-    async def test_adapter_value_error_returns_404(self, client: AsyncClient):
+    async def test_adapter_not_found_error_returns_404(self, client: AsyncClient):
         with patch("app.routers.api.registry.get") as mock_get:
             mock_adapter = AsyncMock()
-            mock_adapter.fetch.side_effect = ValueError("Package not found")
+            mock_adapter.fetch.side_effect = EntityNotFoundError("Package not found")
             mock_get.return_value = mock_adapter
 
             response = await client.get(

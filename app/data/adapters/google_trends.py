@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.logging_config import get_logger
 from app.models.schemas import (
     DataPoint,
@@ -140,7 +140,7 @@ class GoogleTrendsAdapter(DataAdapter):
         df = pytrends.interest_over_time()
 
         if df.empty:
-            raise ValueError(
+            raise EntityNotFoundError(
                 f"No Google Trends data found for '{keyword}' "
                 f"with timeframe '{timeframe}'"
             )

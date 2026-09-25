@@ -7,7 +7,11 @@ from app.models.schemas import DataPoint, TimeSeries
 if TYPE_CHECKING:
     from app.data.base import DataAdapter
 
-_STANDARD_FREQS = {"day", "week", "month", "quarter", "season", "year"}
+_STANDARD_FREQS = {"day", "week", "month", "quarter", "year"}
+
+# Legacy values that map onto a standard frequency. "season" used to be its own
+# option but produced buckets identical to "year".
+_FREQ_ALIASES = {"season": "year", "seasonal": "year"}
 
 
 def _week_bucket(d: datetime.date) -> datetime.date:
@@ -24,10 +28,6 @@ def _quarter_bucket(d: datetime.date) -> datetime.date:
     return datetime.date(d.year, q_month, 1)
 
 
-def _season_bucket(d: datetime.date) -> datetime.date:
-    return datetime.date(d.year, 1, 1)
-
-
 def _year_bucket(d: datetime.date) -> datetime.date:
     return datetime.date(d.year, 1, 1)
 
@@ -36,7 +36,6 @@ _BUCKET_FN = {
     "week": _week_bucket,
     "month": _month_bucket,
     "quarter": _quarter_bucket,
-    "season": _season_bucket,
     "year": _year_bucket,
 }
 
@@ -51,8 +50,9 @@ def resample_series(
 
     Args:
         ts: Input time series.
-        freq: Standard frequency ("day", "week", "month", "quarter", "season", "year")
-              or adapter-specific custom period.
+        freq: Standard frequency ("day", "week", "month", "quarter", "year")
+              or adapter-specific custom period. The legacy value "season"
+              (or "seasonal") is treated as "year".
         method: "mean" or "sum".
         adapter: Optional adapter for custom resample periods.
 
@@ -61,6 +61,8 @@ def resample_series(
     """
     if freq is None or freq == "day":
         return ts
+
+    freq = _FREQ_ALIASES.get(freq, freq)
 
     # Check if it's a standard frequency
     bucket_fn = _BUCKET_FN.get(freq)

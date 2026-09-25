@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Autocomplete from '@mui/material/Autocomplete'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import Card from '@mui/material/Card'
-import CardContent from '@mui/material/CardContent'
+import Collapse from '@mui/material/Collapse'
 import FormControl from '@mui/material/FormControl'
 import InputLabel from '@mui/material/InputLabel'
 import IconButton from '@mui/material/IconButton'
@@ -14,6 +13,7 @@ import Slider from '@mui/material/Slider'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import type { DataSourceInfo, FormField, LookupItem } from '../api/types'
 import { fetchLookup } from '../api/client'
@@ -26,7 +26,6 @@ export interface QueryPrefill {
   start?: string
   end?: string
   resample?: string
-  apply?: string
 }
 
 interface Props {
@@ -34,6 +33,51 @@ interface Props {
   loading: boolean
   onSubmit: (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => void
   prefill?: QueryPrefill | null
+  onSourceChange?: (source: string) => void
+}
+
+/**
+ * Fields shown up front, per source. Everything else from the backend's
+ * form_fields metadata goes into "Advanced" with a default filled in.
+ * Sources not listed here show all their fields up front.
+ */
+const PRIMARY_FIELDS: Record<string, string[]> = {
+  wikipedia: ['project', 'article'],
+  weather: ['location', 'metric'],
+  stocks: ['symbol', 'metric'],
+  asa: ['league', 'team', 'metric'],
+  google_trends: ['keyword', 'timeframe'],
+}
+
+/** Explicit defaults for select fields; other selects default to their first option. */
+const FIELD_DEFAULTS: Record<string, Record<string, string>> = {
+  wikipedia: { project: 'en.wikipedia', access: 'all-access', agent: 'user', granularity: 'daily' },
+  weather: { temp_unit: 'celsius', wind_unit: 'kmh', precip_unit: 'mm' },
+  stocks: { interval: '1d', range: '1y' },
+  asa: { home_away: 'all', stage: 'all' },
+}
+
+/** Fields allowed to be blank when submitting. */
+const OPTIONAL_FIELDS: Record<string, string[]> = {
+  google_trends: ['geo'],
+}
+
+const EMPTY_FIELDS: FormField[] = []
+
+function isPrimary(source: string, field: FormField): boolean {
+  const allow = PRIMARY_FIELDS[source]
+  return !allow || allow.includes(field.name)
+}
+
+function defaultValues(source: string, fields: FormField[]): Record<string, string> {
+  const explicit = FIELD_DEFAULTS[source] || {}
+  const values: Record<string, string> = {}
+  for (const f of fields) {
+    if (f.field_type !== 'select' || f.depends_on || f.options.length === 0) continue
+    const wanted = explicit[f.name]
+    values[f.name] = wanted && f.options.some((o) => o.value === wanted) ? wanted : f.options[0].value
+  }
+  return values
 }
 
 function decomposeQuery(query: string, formFields: FormField[]): Record<string, string> {
@@ -44,84 +88,78 @@ function decomposeQuery(query: string, formFields: FormField[]): Record<string, 
   const parts = query.split(':')
   const values: Record<string, string> = {}
   formFields.forEach((f, i) => {
-    values[f.name] = parts[i] || ''
+    if (parts[i]) values[f.name] = parts[i]
   })
   return values
 }
 
-export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
+export function QueryForm({ sources, loading, onSubmit, prefill, onSourceChange }: Props) {
   const [source, setSource] = useState('')
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [horizon, setHorizon] = useState(14)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [resample, setResample] = useState('')
-  const [apply, setApply] = useState('')
-  const [showDateRange, setShowDateRange] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [lookupCache, setLookupCache] = useState<Record<string, LookupItem[]>>({})
   const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({})
   const [lastPrefill, setLastPrefill] = useState<QueryPrefill | null>(null)
-  const prefillRef = useRef(false)
   const [csvRefreshKey, setCsvRefreshKey] = useState(0)
 
   const selectedSource = sources.find((s) => s.name === source)
-  const formFields = selectedSource?.form_fields || []
+  const formFields = selectedSource?.form_fields ?? EMPTY_FIELDS
+  const primaryFields = formFields.filter((f) => isPrimary(source, f))
+  const advancedFields = formFields.filter((f) => !isPrimary(source, f))
 
-  // Apply prefill when it changes
-  useEffect(() => {
-    if (!prefill || prefill === lastPrefill) return
+  // Apply a new prefill (NL result, saved view, recent query) during render.
+  if (prefill && prefill !== lastPrefill) {
     setLastPrefill(prefill)
-    prefillRef.current = true
     setSource(prefill.source)
     setHorizon(prefill.horizon)
-    setResample(prefill.resample || '')
-    setApply(prefill.apply || '')
-    if (prefill.start || prefill.end) {
-      setStartDate(prefill.start || '')
-      setEndDate(prefill.end || '')
-      setShowDateRange(true)
-    }
-    // Decompose query into field values using the target source's form fields
+    setResample(prefill.resample === 'season' ? 'year' : prefill.resample || '')
+    setStartDate(prefill.start || '')
+    setEndDate(prefill.end || '')
     const targetSource = sources.find((s) => s.name === prefill.source)
     if (targetSource) {
-      setFieldValues(decomposeQuery(prefill.query, targetSource.form_fields))
+      setFieldValues({
+        ...defaultValues(prefill.source, targetSource.form_fields),
+        ...decomposeQuery(prefill.query, targetSource.form_fields),
+      })
+    } else {
+      setFieldValues({})
     }
-  }, [prefill, lastPrefill, sources])
+  }
 
-  useEffect(() => {
-    if (prefillRef.current) {
-      prefillRef.current = false
-      return
-    }
-    setFieldValues({})
-  }, [source])
+  const handleSourceChange = (next: string) => {
+    setSource(next)
+    const target = sources.find((s) => s.name === next)
+    setFieldValues(target ? defaultValues(next, target.form_fields) : {})
+    onSourceChange?.(next)
+  }
+
+  const lookupKey = useCallback(
+    (field: FormField) => {
+      const depValue = field.depends_on ? fieldValues[field.depends_on] : ''
+      return `${source}:${field.name}:${depValue}:${csvRefreshKey}`
+    },
+    [source, fieldValues, csvRefreshKey],
+  )
 
   const loadLookup = useCallback(
     async (field: FormField) => {
       if (field.field_type !== 'autocomplete') return
-
       const depValue = field.depends_on ? fieldValues[field.depends_on] : ''
-      // For entity field, also factor in entity_type to cache key
-      const entityType = fieldValues['entity_type'] || ''
-      const cacheKey = field.name === 'entity'
-        ? `${source}:${field.name}:${depValue}:${entityType}:${csvRefreshKey}`
-        : `${source}:${field.name}:${depValue}:${csvRefreshKey}`
-
+      const cacheKey = lookupKey(field)
       if (lookupCache[cacheKey] || lookupLoading[cacheKey]) return
       if (field.depends_on && !depValue) return
 
       setLookupLoading((prev) => ({ ...prev, [cacheKey]: true }))
       try {
-        // Use entity_type value (teams/players) for lookup type
-        const lookupType = field.name === 'entity'
-          ? (fieldValues['entity_type'] || 'teams')
-          : field.name
-        // Build depends object with actual field name as key
         const depends: Record<string, string> = {}
         if (field.depends_on && depValue) {
           depends[field.depends_on] = depValue
         }
-        const items = await fetchLookup(source, lookupType, depends)
+        const items = await fetchLookup(source, field.name, depends)
         setLookupCache((prev) => ({ ...prev, [cacheKey]: items }))
       } catch {
         // Silently fail
@@ -129,7 +167,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
         setLookupLoading((prev) => ({ ...prev, [cacheKey]: false }))
       }
     },
-    [source, fieldValues, lookupCache, lookupLoading, csvRefreshKey],
+    [source, fieldValues, lookupCache, lookupLoading, lookupKey],
   )
 
   useEffect(() => {
@@ -145,58 +183,42 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
     if (formFields.length === 1 && formFields[0].name === 'query') {
       return fieldValues['query'] || ''
     }
-    const parts: string[] = []
-    for (const field of formFields) {
-      parts.push(fieldValues[field.name] || '')
-    }
-    return parts.join(':')
+    return formFields.map((f) => fieldValues[f.name] || '').join(':')
   }
 
   const handleSubmit = (e: React.FormEvent, refresh?: boolean) => {
     e.preventDefault()
     const query = buildQuery()
     if (source && query) {
-      onSubmit(source, query, horizon, startDate || undefined, endDate || undefined, resample || undefined, apply || undefined, refresh)
+      onSubmit(source, query, horizon, startDate || undefined, endDate || undefined, resample || undefined, undefined, refresh)
     }
   }
 
   const setField = (name: string, value: string) => {
     setFieldValues((prev) => {
       const next = { ...prev, [name]: value }
-      // Clear dependent fields
       for (const f of formFields) {
         if (f.depends_on === name) {
           next[f.name] = ''
         }
       }
-      // Also clear entity when entity_type changes
-      if (name === 'entity_type') {
-        next['entity'] = ''
-      }
       return next
     })
   }
 
-  const getLookupItems = (field: FormField): LookupItem[] => {
-    const depValue = field.depends_on ? fieldValues[field.depends_on] : ''
-    const entityType = fieldValues['entity_type'] || ''
-    const cacheKey = field.name === 'entity'
-      ? `${source}:${field.name}:${depValue}:${entityType}:${csvRefreshKey}`
-      : `${source}:${field.name}:${depValue}:${csvRefreshKey}`
-    return lookupCache[cacheKey] || []
-  }
-
   const handleCsvUploadComplete = (uploadId: string) => {
-    // Refresh lookup cache and select the newly uploaded dataset
     setCsvRefreshKey((k) => k + 1)
     setFieldValues({ query: uploadId })
   }
 
+  const optional = OPTIONAL_FIELDS[source] || []
   const isComplete =
-    source &&
+    !!source &&
     formFields.every(
-      (f) => fieldValues[f.name] && fieldValues[f.name].trim() !== '',
+      (f) => optional.includes(f.name) || (fieldValues[f.name] && fieldValues[f.name].trim() !== ''),
     )
+
+  const itemSx = { flex: '1 1 180px', minWidth: 0 }
 
   const renderField = (field: FormField) => {
     if (field.field_type === 'text') {
@@ -208,7 +230,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
           value={fieldValues[field.name] || ''}
           onChange={(e) => setField(field.name, e.target.value)}
           placeholder={field.placeholder}
-          sx={{ minWidth: 200, flex: 1 }}
+          sx={itemSx}
         />
       )
     }
@@ -216,12 +238,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
     if (field.field_type === 'select') {
       const disabled = field.depends_on ? !fieldValues[field.depends_on] : false
       return (
-        <FormControl
-          key={`${source}-${field.name}`}
-          size="small"
-          sx={{ minWidth: 150 }}
-          disabled={disabled}
-        >
+        <FormControl key={`${source}-${field.name}`} size="small" sx={itemSx} disabled={disabled}>
           <InputLabel>{field.label}</InputLabel>
           <Select
             value={fieldValues[field.name] || ''}
@@ -239,7 +256,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
     }
 
     if (field.field_type === 'autocomplete') {
-      const items = getLookupItems(field)
+      const items = lookupCache[lookupKey(field)] || []
       const disabled = field.depends_on ? !fieldValues[field.depends_on] : false
       const selectedItem = items.find((item) => item.value === fieldValues[field.name]) || null
 
@@ -247,7 +264,7 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
         <Autocomplete
           key={`${source}-${field.name}`}
           size="small"
-          sx={{ minWidth: 220 }}
+          sx={{ flex: '1 1 220px', minWidth: 0 }}
           options={items}
           getOptionLabel={(opt) => opt.label}
           value={selectedItem}
@@ -271,35 +288,122 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
   }
 
   return (
-    <Card sx={{ mb: 3 }}>
-      <CardContent>
-        <form onSubmit={handleSubmit}>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'flex-end' }}>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel>Source</InputLabel>
-              <Select
-                value={source}
-                label="Source"
-                onChange={(e) => setSource(e.target.value)}
-              >
-                {sources.map((s) => (
-                  <MenuItem key={s.name} value={s.name}>
-                    {s.name} &mdash; {s.description}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+    <form onSubmit={handleSubmit}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
+        <FormControl size="small" sx={{ flex: '1 1 200px', minWidth: 0 }}>
+          <InputLabel>Source</InputLabel>
+          <Select
+            value={source}
+            label="Source"
+            onChange={(e) => handleSourceChange(e.target.value)}
+            renderValue={(v) => v}
+          >
+            {sources.map((s) => (
+              <MenuItem key={s.name} value={s.name}>
+                {s.name} &mdash; {s.description}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
 
-            {formFields.map(renderField)}
+        {primaryFields.map(renderField)}
 
-            {source === 'csv' && (
-              <CSVUpload onUploadComplete={handleCsvUploadComplete} />
+        {source && (
+          <FormControl size="small" sx={{ flex: '0 1 130px', minWidth: 110 }}>
+            <InputLabel>Resample</InputLabel>
+            <Select value={resample} label="Resample" onChange={(e) => setResample(e.target.value)}>
+              <MenuItem value="">None</MenuItem>
+              <MenuItem value="week">Weekly</MenuItem>
+              <MenuItem value="month">Monthly</MenuItem>
+              <MenuItem value="quarter">Quarterly</MenuItem>
+              <MenuItem value="year">Yearly</MenuItem>
+              {selectedSource?.resample_periods?.map((period) => (
+                <MenuItem key={period.value} value={period.value}>
+                  {period.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+
+        {source && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Button type="submit" variant="contained" disabled={loading || !isComplete}>
+              {loading ? 'Loading...' : 'Analyze'}
+            </Button>
+            {isComplete && !loading && (
+              <Tooltip title="Refresh (bypass cache)">
+                <IconButton size="small" onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}>
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             )}
+          </Box>
+        )}
+      </Box>
 
-            {source && (
-              <Box sx={{ width: 180, px: 1 }}>
-                <Typography variant="caption" color="text.secondary" gutterBottom>
-                  Forecast: {horizon} days
+      {source === 'csv' && (
+        <Box sx={{ mt: 1.5 }}>
+          <CSVUpload onUploadComplete={handleCsvUploadComplete} />
+        </Box>
+      )}
+
+      {source && (
+        <Box sx={{ mt: 1.5 }}>
+          <Link
+            component="button"
+            type="button"
+            variant="body2"
+            underline="hover"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}
+          >
+            Advanced
+            <ExpandMoreIcon
+              fontSize="small"
+              sx={{ transition: 'transform 0.2s', transform: showAdvanced ? 'rotate(180deg)' : 'none' }}
+            />
+            {(startDate || endDate) && !showAdvanced && (
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                (date range set)
+              </Typography>
+            )}
+          </Link>
+          <Collapse in={showAdvanced}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 1.5,
+                mt: 1.5,
+                pt: 1.5,
+                borderTop: '1px solid',
+                borderColor: 'divider',
+                alignItems: 'center',
+              }}
+            >
+              {advancedFields.map(renderField)}
+              <TextField
+                size="small"
+                label="Start date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ flex: '1 1 150px' }}
+              />
+              <TextField
+                size="small"
+                label="End date"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                slotProps={{ inputLabel: { shrink: true } }}
+                sx={{ flex: '1 1 150px' }}
+              />
+              <Box sx={{ flex: '1 1 180px', px: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Forecast horizon: {horizon} periods
                 </Typography>
                 <Slider
                   size="small"
@@ -308,117 +412,26 @@ export function QueryForm({ sources, loading, onSubmit, prefill }: Props) {
                   min={7}
                   max={90}
                   step={7}
-                  marks={[
-                    { value: 7, label: '7' },
-                    { value: 30, label: '30' },
-                    { value: 60, label: '60' },
-                    { value: 90, label: '90' },
-                  ]}
                   valueLabelDisplay="auto"
                 />
               </Box>
-            )}
-
-            {source && (
-              <FormControl size="small" sx={{ minWidth: 130 }}>
-                <InputLabel>Resample</InputLabel>
-                <Select
-                  value={resample}
-                  label="Resample"
-                  onChange={(e) => setResample(e.target.value)}
-                >
-                  <MenuItem value="">None</MenuItem>
-                  <MenuItem value="week">Weekly</MenuItem>
-                  <MenuItem value="month">Monthly</MenuItem>
-                  <MenuItem value="quarter">Quarterly</MenuItem>
-                  <MenuItem value="season">Seasonal</MenuItem>
-                  <MenuItem value="year">Yearly</MenuItem>
-                  {selectedSource?.resample_periods?.map((period) => (
-                    <MenuItem key={period.value} value={period.value}>
-                      {period.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-
-            {source && (
-              <Link
-                component="button"
-                type="button"
-                variant="body2"
-                onClick={() => setShowDateRange(!showDateRange)}
-                sx={{ alignSelf: 'center', pb: 0.5 }}
-              >
-                {showDateRange ? 'Hide options' : 'More options'}
-              </Link>
-            )}
-
-            {source && (
-              <Button
-                type="submit"
-                variant="contained"
-                disabled={loading || !isComplete}
-              >
-                {loading ? 'Loading...' : 'Analyze'}
-              </Button>
-            )}
-
-            {source && isComplete && !loading && (
-              <Tooltip title="Refresh (bypass cache)">
-                <IconButton
-                  size="small"
-                  onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
-                >
-                  <RefreshIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-          </Box>
-
-          {showDateRange && source && (
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider', alignItems: 'flex-end' }}>
-              <TextField
-                size="small"
-                label="Start Date"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                sx={{ width: 170 }}
-              />
-              <TextField
-                size="small"
-                label="End Date"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                slotProps={{ inputLabel: { shrink: true } }}
-                sx={{ width: 170 }}
-              />
-              <TextField
-                size="small"
-                label="Transforms"
-                value={apply}
-                onChange={(e) => setApply(e.target.value)}
-                placeholder="e.g. normalize|rolling_avg_7d"
-                sx={{ minWidth: 220, flex: 1 }}
-              />
-              {(startDate || endDate || apply) && (
+              {(startDate || endDate) && (
                 <Link
                   component="button"
                   type="button"
                   variant="body2"
-                  onClick={() => { setStartDate(''); setEndDate(''); setApply('') }}
-                  sx={{ alignSelf: 'flex-end', pb: 0.5 }}
+                  onClick={() => {
+                    setStartDate('')
+                    setEndDate('')
+                  }}
                 >
-                  Clear
+                  Clear dates
                 </Link>
               )}
             </Box>
-          )}
-        </form>
-      </CardContent>
-    </Card>
+          </Collapse>
+        </Box>
+      )}
+    </form>
   )
 }

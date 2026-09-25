@@ -63,3 +63,13 @@ class DataAdapter(ABC):
         raise NotImplementedError(
             f"Adapter '{self.name}' does not support custom resample period '{period}'"
         )
+
+
+class EntityNotFoundError(ValueError):
+    """The requested entity (package, coin, article, ...) doesn't exist.
+
+    Adapters raise this for a genuinely unknown/not-found query so the API
+    can return 404; any other ``ValueError`` (bad format, rate limit, ...) is
+    reported as 422 with its real message. Subclasses ``ValueError`` so
+    existing callers that catch ``ValueError`` keep working.
+    """

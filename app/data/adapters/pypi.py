@@ -3,7 +3,7 @@ from collections import defaultdict
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.models.schemas import DataPoint, FormField, TimeSeries
 
 PYPI_STATS_URL = "https://pypistats.org/api/packages/{package}/overall"
@@ -38,7 +38,9 @@ class PyPIAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code == 404:
-                    raise ValueError(f"Package '{query}' not found on PyPI") from None
+                    raise EntityNotFoundError(
+                        f"Package '{query}' not found on PyPI"
+                    ) from None
                 raise
 
         raw_data = response.json()["data"]

@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from app.analysis.trend_metrics import DIRECTION_THRESHOLD
+from app.analysis.trend_metrics import DIRECTION_THRESHOLD, slope_pct_per_month
 from app.models.schemas import Regime, StructuralBreak, TimeSeries
 
 
@@ -15,6 +15,7 @@ def detect_regimes(
     - mean value
     - mean return (average pct change per step)
     - volatility (std of returns)
+    - slope in % of level per month (least-squares, over actual dates)
 
     Direction is classified against ``DIRECTION_THRESHOLD`` from
     ``trend_metrics``.
@@ -64,6 +65,8 @@ def detect_regimes(
         else:
             label = "stable"
 
+        slope_pct = slope_pct_per_month(dates[start:end], seg_values)
+
         regimes.append(
             Regime(
                 start_date=str(dates[start]),
@@ -72,6 +75,7 @@ def detect_regimes(
                 mean_value=mean_value,
                 mean_return=mean_return,
                 volatility=volatility,
+                slope_pct_per_month=slope_pct,
             )
         )
 

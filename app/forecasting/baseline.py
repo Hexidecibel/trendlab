@@ -4,21 +4,24 @@ import datetime
 
 import numpy as np
 
+from app.forecasting.frequency import future_dates
 from app.models.schemas import ForecastPoint, ModelForecast
 
 Z_SCORE_95 = 1.96
 
 
 def _make_forecast_points(
-    last_date: datetime.date,
+    dates: list[datetime.date],
     forecast_values: np.ndarray,
     residual_std: float,
     horizon: int,
 ) -> list[ForecastPoint]:
-    """Build ForecastPoint list with widening 95% confidence intervals."""
+    """Build ForecastPoint list with widening 95% confidence intervals.
+
+    Forecast dates follow the series' own step (daily, weekly, monthly, ...).
+    """
     points = []
-    for step in range(1, horizon + 1):
-        date = last_date + datetime.timedelta(days=step)
+    for step, date in enumerate(future_dates(dates, horizon), start=1):
         value = float(forecast_values[step - 1])
         width = Z_SCORE_95 * residual_std * np.sqrt(step)
         points.append(
@@ -44,14 +47,14 @@ def forecast_naive(
     last_value = float(values[-1])
     forecast_values = np.full(horizon, last_value)
 
-    if len(values) >= 2:
+    if len(values) >= 3:  # ddof=1 needs at least two differences
         residual_std = float(np.std(np.diff(values), ddof=1))
     else:
         residual_std = 0.0
 
     return ModelForecast(
         model_name="naive",
-        points=_make_forecast_points(dates[-1], forecast_values, residual_std, horizon),
+        points=_make_forecast_points(dates, forecast_values, residual_std, horizon),
     )
 
 
@@ -69,14 +72,14 @@ def forecast_moving_average(
     ma_value = float(np.mean(values[-effective_window:]))
     forecast_values = np.full(horizon, ma_value)
 
-    if len(values) >= 2:
+    if len(values) >= 3:  # ddof=1 needs at least two differences
         residual_std = float(np.std(np.diff(values), ddof=1))
     else:
         residual_std = 0.0
 
     return ModelForecast(
         model_name="moving_average",
-        points=_make_forecast_points(dates[-1], forecast_values, residual_std, horizon),
+        points=_make_forecast_points(dates, forecast_values, residual_std, horizon),
     )
 
 
@@ -109,5 +112,5 @@ def forecast_linear(
 
     return ModelForecast(
         model_name="linear",
-        points=_make_forecast_points(dates[-1], forecast_values, residual_std, horizon),
+        points=_make_forecast_points(dates, forecast_values, residual_std, horizon),
     )

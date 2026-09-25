@@ -6,9 +6,12 @@ import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Collapse from '@mui/material/Collapse'
 import Link from '@mui/material/Link'
+import InputAdornment from '@mui/material/InputAdornment'
 import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import SearchIcon from '@mui/icons-material/Search'
 import { addToWatchlist, parseNaturalQuery } from '../api/client'
 import { isAlertResult, isCompareResult } from '../api/types'
 import type { NaturalAlertResponse, NaturalCompareItem } from '../api/types'
@@ -151,33 +154,46 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
   }
 
   return (
-    <Box sx={{ mb: 3 }}>
+    <Box sx={{ mb: 2 }}>
       <form onSubmit={handleSubmit}>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'stretch' }}>
           <TextField
             fullWidth
-            size="small"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Describe what you want to analyze in plain English..."
+            placeholder="Ask about any trend, e.g. fastapi downloads this year"
             disabled={parsing}
+            autoFocus
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon color="action" />
+                  </InputAdornment>
+                ),
+                sx: { fontSize: { xs: '1rem', sm: '1.1rem' }, bgcolor: 'background.paper', borderRadius: 2 },
+              },
+              htmlInput: { 'aria-label': 'Ask in plain English' },
+            }}
           />
           <Button
             type="submit"
             variant="contained"
             disabled={isDisabled}
-            sx={{ whiteSpace: 'nowrap', minWidth: 80 }}
+            sx={{ whiteSpace: 'nowrap', minWidth: { xs: 64, sm: 96 } }}
           >
             {parsing ? <CircularProgress size={20} color="inherit" /> : 'Ask'}
           </Button>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => setShowHelp(!showHelp)}
-            sx={{ minWidth: 40, px: 1 }}
-          >
-            <HelpOutlineIcon fontSize="small" />
-          </Button>
+          <Tooltip title="Examples">
+            <Button
+              variant="outlined"
+              onClick={() => setShowHelp(!showHelp)}
+              sx={{ minWidth: 44, px: 1 }}
+              aria-label="Show example questions"
+            >
+              <HelpOutlineIcon fontSize="small" />
+            </Button>
+          </Tooltip>
         </Box>
       </form>
 
@@ -231,7 +247,7 @@ export function NaturalQueryInput({ loading, onResult, onCompareResult }: Props)
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
             Tip: Use "vs" or "compare" to overlay series. Say "correlate" to find relationships.
             Try "by MLS season" or "by meteorological season" for custom aggregation.
-            Add "normalized" or "rolling average" for transforms.
+            Add "normalized" to put series on a common scale.
           </Typography>
         </Box>
       </Collapse>

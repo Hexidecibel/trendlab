@@ -53,6 +53,17 @@ export interface TrendSignal {
   acceleration: number
   moving_averages: MovingAverage[]
   momentum_series: DataPoint[]
+  /** Human-readable momentum, e.g. "+3.2% / month" (newer backends). */
+  momentum_label?: string
+  momentum_pct_per_month?: number | null
+  /** Smoothed trend presets (newer backends); rendered in a later wave. */
+  smoothed?: {
+    light: DataPoint[]
+    medium: DataPoint[]
+    heavy: DataPoint[]
+    line: DataPoint[]
+    slope_pct_per_month: number | null
+  } | null
 }
 
 export interface SeasonalityResult {
@@ -102,6 +113,8 @@ export interface TrendAnalysis {
   anomalies: AnomalyReport
   structural_breaks: StructuralBreak[]
   regimes: Regime[]
+  /** Plain-English change summaries (newer backends). */
+  summary_lines?: string[]
 }
 
 export interface ForecastPoint {

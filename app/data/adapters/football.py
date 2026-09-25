@@ -4,7 +4,7 @@ import datetime
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.models.schemas import (
     DataPoint,
     FormField,
@@ -122,7 +122,9 @@ class FootballDataAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
-                    raise ValueError(f"Competition '{competition}' not found") from None
+                    raise EntityNotFoundError(
+                        f"Competition '{competition}' not found"
+                    ) from None
                 raise
 
         teams = response.json().get("teams", [])
@@ -164,7 +166,7 @@ class FootballDataAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code == 404:
-                    raise ValueError(
+                    raise EntityNotFoundError(
                         f"Competition or team not found: '{query}'"
                     ) from None
                 if response.status_code == 403:

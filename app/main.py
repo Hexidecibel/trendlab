@@ -15,7 +15,6 @@ from app.data.adapters.csv_upload import CSVUploadAdapter
 from app.data.adapters.google_trends import GoogleTrendsAdapter
 from app.data.adapters.npm import NpmAdapter
 from app.data.adapters.pypi import PyPIAdapter
-from app.data.adapters.reddit import RedditAdapter
 from app.data.adapters.weather import WeatherAdapter
 from app.data.adapters.wikipedia import WikipediaAdapter
 from app.data.adapters.yahoo_finance import YahooFinanceAdapter
@@ -43,7 +42,6 @@ logger = get_logger(__name__)
 registry.register(PyPIAdapter())
 registry.register(NpmAdapter())
 registry.register(CSVUploadAdapter())
-registry.register(RedditAdapter())
 registry.register(CoinGeckoAdapter())
 registry.register(ASAAdapter())
 registry.register(WikipediaAdapter())
@@ -94,7 +92,8 @@ visualization and forecasting.
 
 - **Multi-source data adapters**: PyPI, crypto, GitHub, soccer stats
 - **Trend analysis**: Momentum, seasonality, anomalies, structural breaks
-- **Forecasting**: Compare ARIMA, ETS, Prophet with evaluation metrics
+- **Forecasting**: Compare naive, moving average, linear and AutoETS models
+  with backtest metrics
 - **Natural language queries**: Describe what you want in plain English
 - **Series comparison**: Overlay series with normalization and transforms
 - **Correlation analysis**: Pearson/Spearman with lag analysis
@@ -105,7 +104,7 @@ visualization and forecasting.
 | Source | Description |
 |--------|-------------|
 | `pypi` | Python package downloads |
-| `coingecko` | Cryptocurrency prices |
+| `crypto` | Cryptocurrency prices (CoinGecko) |
 | `github_stars` | GitHub repository stars (requires token) |
 | `asa` | American Soccer Analysis team/player stats |
 | `football` | European football match data (requires token) |

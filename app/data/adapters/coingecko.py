@@ -2,7 +2,7 @@ import datetime
 
 import httpx
 
-from app.data.base import DataAdapter
+from app.data.base import DataAdapter, EntityNotFoundError
 from app.models.schemas import DataPoint, FormField, TimeSeries
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
@@ -37,7 +37,9 @@ class CoinGeckoAdapter(DataAdapter):
                 response.raise_for_status()
             except httpx.HTTPStatusError:
                 if response.status_code in (400, 404):
-                    raise ValueError(f"Coin '{query}' not found on CoinGecko") from None
+                    raise EntityNotFoundError(
+                        f"Coin '{query}' not found on CoinGecko"
+                    ) from None
                 raise
 
         raw_prices = response.json()["prices"]

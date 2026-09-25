@@ -1,17 +1,20 @@
 import { useState } from 'react'
+import Accordion from '@mui/material/Accordion'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import AccordionSummary from '@mui/material/AccordionSummary'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
 import CircularProgress from '@mui/material/CircularProgress'
+import Collapse from '@mui/material/Collapse'
 import Divider from '@mui/material/Divider'
-import FormControl from '@mui/material/FormControl'
-import FormControlLabel from '@mui/material/FormControlLabel'
-import Checkbox from '@mui/material/Checkbox'
 import Grid from '@mui/material/Grid'
-import InputLabel from '@mui/material/InputLabel'
-import MenuItem from '@mui/material/MenuItem'
-import Select from '@mui/material/Select'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
+import EditIcon from '@mui/icons-material/Edit'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useApi } from '../hooks/useApi'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { ApiError, fetchCompare } from '../api/client'
@@ -33,14 +36,15 @@ import { CohortPanel } from './CohortPanel'
 import { CorrelateTab } from './CorrelateTab'
 import { SaveViewButton } from './SaveViewButton'
 import { ViewsDropdown } from './ViewsDropdown'
-import { InsightsFeed } from './InsightsFeed'
 import { ExportPdfButton } from './ExportPdfButton'
 import { ForecastAccuracyPanel } from './ForecastAccuracyPanel'
 import { WatchlistPanel } from './WatchlistPanel'
 import { ProgressBar } from './ProgressBar'
 import { ErrorAlert } from './ErrorAlert'
-import { PluginsPage } from './PluginsPage'
+import { RecentAndSavedViews } from './RecentAndSavedViews'
 import type { SavedViewResponse } from '../api/types'
+import { clearRecentQueries, loadRecentQueries, recordRecentQuery } from '../recentQueries'
+import type { RecentQuery } from '../recentQueries'
 
 // Generate a friendly label from series metadata or query
 function getFriendlyLabel(s: TimeSeries): string {
@@ -71,11 +75,12 @@ export function Dashboard() {
   const wsProgress = useWebSocket(requestId)
   const [selectedModel, setSelectedModel] = useState('')
   const [lastQuery, setLastQuery] = useState({ source: '', query: '', horizon: 14, resample: '' })
-  const [showBreaks, setShowBreaks] = useState(true)
-  const [showAnomalies, setShowAnomalies] = useState(true)
-  const [showRegimes, setShowRegimes] = useState(true)
+  const [lastRange, setLastRange] = useState<{ start?: string; end?: string }>({})
+  const [showAnnotations, setShowAnnotations] = useState(true)
+  const [editOpen, setEditOpen] = useState(false)
+  const [recent, setRecent] = useState<RecentQuery[]>(() => loadRecentQueries())
 
-  const [activeTab, setActiveTab] = useState<'forecast' | 'compare' | 'correlate' | 'plugins'>('forecast')
+  const [activeTab, setActiveTab] = useState<'forecast' | 'compare' | 'correlate'>('forecast')
   const [compareSeries, setCompareSeries] = useState<TimeSeries[] | null>(null)
   const [compareAnalyses, setCompareAnalyses] = useState<TrendAnalysis[] | null>(null)
   const [compareResample, setCompareResample] = useState('')
@@ -83,7 +88,6 @@ export function Dashboard() {
   const [compareItems, setCompareItems] = useState<CompareItem[]>([])
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareError, setCompareError] = useState<string | ApiError | null>(null)
-  const [anomalyMethod, setAnomalyMethod] = useState('zscore')
   const [queryPrefill, setQueryPrefill] = useState<QueryPrefill | null>(null)
   const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
   const [lastApply, setLastApply] = useState('')
@@ -91,23 +95,42 @@ export function Dashboard() {
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => {
     setActiveTab('forecast')
     setLastQuery({ source, query, horizon, resample: resample || '' })
+    setLastRange({ start, end })
     setLastApply(apply || '')
     setSelectedModel('')
-    loadData(source, query, horizon, start, end, resample, apply, anomalyMethod, refresh)
+    // Anomaly method is left to the backend default (trend-residual scoring).
+    loadData(source, query, horizon, start, end, resample, apply, undefined, refresh).then((s) => {
+      if (!s) return
+      setRecent(
+        recordRecentQuery({
+          source,
+          query,
+          horizon,
+          start,
+          end,
+          resample,
+          apply,
+          label: getFriendlyLabel(s),
+        }),
+      )
+    })
+  }
+
+  const loadWithPrefill = (
+    source: string,
+    query: string,
+    horizon: number,
+    start?: string,
+    end?: string,
+    resample?: string,
+    apply?: string,
+  ) => {
+    setQueryPrefill({ source, query, horizon, start, end, resample })
+    handleSubmit(source, query, horizon, start, end, resample, apply)
   }
 
   const handleLoadView = (view: SavedViewResponse) => {
-    setActiveTab('forecast')
-    setQueryPrefill({
-      source: view.source,
-      query: view.query,
-      horizon: view.horizon,
-      start: view.start ?? undefined,
-      end: view.end ?? undefined,
-      resample: view.resample ?? undefined,
-      apply: view.apply ?? undefined,
-    })
-    handleSubmit(
+    loadWithPrefill(
       view.source,
       view.query,
       view.horizon,
@@ -118,9 +141,22 @@ export function Dashboard() {
     )
   }
 
+  const handleLoadRecent = (r: RecentQuery) => {
+    loadWithPrefill(r.source, r.query, r.horizon || 14, r.start, r.end, r.resample, r.apply)
+  }
+
+  const handleClearRecent = () => {
+    clearRecentQueries()
+    setRecent([])
+  }
+
   const handleNlExplore = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string) => {
-    setQueryPrefill({ source, query, horizon, start, end, resample, apply })
-    handleSubmit(source, query, horizon, start, end, resample, apply)
+    loadWithPrefill(source, query, horizon, start, end, resample, apply)
+  }
+
+  const handleFormSourceChange = (source: string) => {
+    // CSV needs the upload control, which lives in the form
+    if (source === 'csv') setEditOpen(true)
   }
 
   const handleCompare = async (items: CompareItem[], resample?: string, apply?: string) => {
@@ -164,8 +200,11 @@ export function Dashboard() {
 
   const effectiveModel =
     selectedModel || forecast?.recommended_model || ''
+  const isAutoModel = !!forecast && effectiveModel === forecast.recommended_model
+  const forecastLabel = isAutoModel ? `Forecast (auto · ${effectiveModel})` : `Forecast (${effectiveModel})`
 
   const hasData = series && analysis && forecast
+  const csvSelected = queryPrefill?.source === 'csv'
 
   return (
     <Box>
@@ -175,35 +214,67 @@ export function Dashboard() {
         onCompareResult={handleNlCompare}
       />
 
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 1,
+          mb: 2,
+          borderBottom: 1,
+          borderColor: 'divider',
+        }}
+      >
         <Tabs
           value={activeTab}
           onChange={(_, v) => setActiveTab(v)}
+          variant="scrollable"
+          scrollButtons={false}
+          sx={{
+            minWidth: 0,
+            '& .MuiTab-root': { minWidth: { xs: 64, sm: 90 }, px: { xs: 1.25, sm: 2 } },
+          }}
         >
           <Tab value="forecast" label="Forecast" />
           <Tab value="compare" label="Compare" />
           <Tab value="correlate" label="Correlate" />
-          <Tab value="plugins" label="Plugins" />
         </Tabs>
-        <Box sx={{ pb: 1 }}>
+        <Box sx={{ pb: 1, flexShrink: 0 }}>
           <ViewsDropdown onLoadView={handleLoadView} />
         </Box>
       </Box>
 
       {activeTab === 'forecast' && (
         <>
-          <Divider sx={{ my: 2 }}>
-            <Typography variant="caption" color="text.secondary">
-              or use the form
-            </Typography>
-          </Divider>
-
-          <QueryForm
-            sources={sources}
-            loading={loading}
-            onSubmit={handleSubmit}
-            prefill={queryPrefill}
-          />
+          <Box sx={{ mb: 2 }}>
+            <Button
+              size="small"
+              variant="text"
+              startIcon={<EditIcon fontSize="small" />}
+              endIcon={
+                <ExpandMoreIcon
+                  sx={{ transition: 'transform 0.2s', transform: editOpen || csvSelected ? 'rotate(180deg)' : 'none' }}
+                />
+              }
+              onClick={() => setEditOpen(!editOpen)}
+              aria-expanded={editOpen || csvSelected}
+            >
+              Edit query
+            </Button>
+            <Collapse in={editOpen || csvSelected}>
+              <Card sx={{ mt: 1 }}>
+                <CardContent>
+                  <QueryForm
+                    sources={sources}
+                    loading={loading}
+                    onSubmit={handleSubmit}
+                    prefill={queryPrefill}
+                    onSourceChange={handleFormSourceChange}
+                  />
+                </CardContent>
+              </Card>
+            </Collapse>
+          </Box>
 
           {error && <ErrorAlert error={error} />}
 
@@ -212,151 +283,117 @@ export function Dashboard() {
           )}
 
           {hasData && (
-            <>
-              <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <ModelSelector
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, lg: 8 }}>
+                <ForecastChart
+                  series={series}
                   forecast={forecast}
-                  selected={effectiveModel}
-                  onChange={setSelectedModel}
-                />
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <ExportPdfButton
-                    source={lastQuery.source}
-                    query={lastQuery.query}
-                    horizon={lastQuery.horizon}
-                    resample={lastQuery.resample || undefined}
-                    apply={lastApply || undefined}
-                  />
-                  <SaveViewButton
-                    source={lastQuery.source}
-                    query={lastQuery.query}
-                    horizon={lastQuery.horizon}
-                    resample={lastQuery.resample || undefined}
-                    apply={lastApply || undefined}
-                    anomalyMethod={anomalyMethod}
-                  />
-                </Box>
-              </Box>
-
-              <Grid container spacing={3}>
-                <Grid size={{ xs: 12, lg: 8 }}>
-                  <ForecastChart
-                    series={series}
-                    forecast={forecast}
-                    selectedModel={effectiveModel}
-                    analysis={analysis}
-                    showBreaks={showBreaks}
-                    showAnomalies={showAnomalies}
-                    showRegimes={showRegimes}
-                    resample={lastQuery.resample}
-                  />
-                  <Box sx={{ mt: 1, display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={showBreaks}
-                          onChange={(e) => setShowBreaks(e.target.checked)}
-                        />
-                      }
-                      label={<Typography variant="body2">Structural breaks</Typography>}
-                    />
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={showAnomalies}
-                          onChange={(e) => setShowAnomalies(e.target.checked)}
-                        />
-                      }
-                      label={<Typography variant="body2">Anomalies</Typography>}
-                    />
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={showRegimes}
-                          onChange={(e) => setShowRegimes(e.target.checked)}
-                        />
-                      }
-                      label={<Typography variant="body2">Regimes</Typography>}
-                    />
-                    <FormControl size="small" sx={{ minWidth: 110 }}>
-                      <InputLabel>Anomaly method</InputLabel>
-                      <Select
-                        value={anomalyMethod}
-                        label="Anomaly method"
-                        onChange={(e) => setAnomalyMethod(e.target.value)}
-                      >
-                        <MenuItem value="zscore">Z-score</MenuItem>
-                        <MenuItem value="iqr">IQR</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Box>
-                  <Box sx={{ mt: 2 }}>
-                    <EvaluationTable
-                      evaluations={forecast.evaluations}
-                      recommended={forecast.recommended_model}
-                    />
-                  </Box>
-                  {lastQuery.source && lastQuery.query && (
-                    <ForecastAccuracyPanel
+                  selectedModel={effectiveModel}
+                  forecastLabel={forecastLabel}
+                  analysis={analysis}
+                  showAnnotations={showAnnotations}
+                  onShowAnnotationsChange={setShowAnnotations}
+                  resample={lastQuery.resample}
+                  actions={
+                    <SaveViewButton
+                      iconOnly
                       source={lastQuery.source}
                       query={lastQuery.query}
-                      forecast={forecast}
-                    />
-                  )}
-                  {lastQuery.source && lastQuery.query && (
-                    <CausalImpactPanel
-                      source={lastQuery.source}
-                      query={lastQuery.query}
+                      horizon={lastQuery.horizon}
+                      start={lastRange.start}
+                      end={lastRange.end}
                       resample={lastQuery.resample || undefined}
                       apply={lastApply || undefined}
                     />
-                  )}
-                </Grid>
-
-                <Grid size={{ xs: 12, lg: 4 }}>
-                  <AnalysisPanel analysis={analysis} />
-                  {lastQuery.source && lastQuery.query && (
-                    <Box sx={{ mt: 3 }}>
-                      <InsightPanel
+                  }
+                />
+                {lastQuery.source && lastQuery.query && (
+                  <CausalImpactPanel
+                    source={lastQuery.source}
+                    query={lastQuery.query}
+                    resample={lastQuery.resample || undefined}
+                    apply={lastApply || undefined}
+                  />
+                )}
+                <Accordion
+                  disableGutters
+                  sx={{ mt: 2, borderRadius: 3, '&:before': { display: 'none' } }}
+                >
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography variant="subtitle2">Advanced</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 1, alignSelf: 'center' }}>
+                      models, accuracy, PDF
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center', mb: 2 }}>
+                      <Box sx={{ overflowX: 'auto', maxWidth: '100%' }}>
+                        <ModelSelector
+                          forecast={forecast}
+                          selected={effectiveModel}
+                          onChange={setSelectedModel}
+                        />
+                      </Box>
+                      <ExportPdfButton
                         source={lastQuery.source}
                         query={lastQuery.query}
                         horizon={lastQuery.horizon}
-                        series={series}
-                        analysis={analysis}
-                        forecast={forecast}
+                        start={lastRange.start}
+                        end={lastRange.end}
+                        resample={lastQuery.resample || undefined}
+                        apply={lastApply || undefined}
                       />
                     </Box>
-                  )}
-                </Grid>
+                    <Box sx={{ overflowX: 'auto' }}>
+                      <EvaluationTable
+                        evaluations={forecast.evaluations}
+                        recommended={forecast.recommended_model}
+                      />
+                    </Box>
+                    {lastQuery.source && lastQuery.query && (
+                      <ForecastAccuracyPanel
+                        source={lastQuery.source}
+                        query={lastQuery.query}
+                        forecast={forecast}
+                      />
+                    )}
+                  </AccordionDetails>
+                </Accordion>
               </Grid>
-            </>
+
+              <Grid size={{ xs: 12, lg: 4 }}>
+                <AnalysisPanel analysis={analysis} />
+                {lastQuery.source && lastQuery.query && (
+                  <Box sx={{ mt: 3 }}>
+                    <InsightPanel
+                      source={lastQuery.source}
+                      query={lastQuery.query}
+                      horizon={lastQuery.horizon}
+                      series={series}
+                      analysis={analysis}
+                      forecast={forecast}
+                    />
+                  </Box>
+                )}
+              </Grid>
+            </Grid>
           )}
 
-          {!hasData && !loading && !error && (
+          {!hasData && !loading && (
             <Grid container spacing={3}>
               <Grid size={{ xs: 12, md: 8 }}>
-                <Box sx={{ textAlign: 'center', py: 8 }}>
-                  <Typography variant="body1" color="text.secondary" gutterBottom>
-                    Select a data source and enter a query to get started
-                  </Typography>
-                  <Typography variant="body2" color="text.disabled">
-                    Try PyPI with "fastapi" or Crypto with "bitcoin"
-                  </Typography>
-                </Box>
+                <RecentAndSavedViews
+                  recent={recent}
+                  onLoadRecent={handleLoadRecent}
+                  onLoadView={handleLoadView}
+                  onClearRecent={handleClearRecent}
+                />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <InsightsFeed
-                  onSelectInsight={(source, query) => handleSubmit(source, query, 14)}
+                <WatchlistPanel
+                  sources={sources}
+                  onLoadQuery={(source, query) => handleSubmit(source, query, 14)}
                 />
-                <Box sx={{ mt: 2 }}>
-                  <WatchlistPanel
-                    sources={sources}
-                    onLoadQuery={(source, query) => handleSubmit(source, query, 14)}
-                  />
-                </Box>
               </Grid>
             </Grid>
           )}
@@ -446,7 +483,6 @@ export function Dashboard() {
         <CorrelateTab sources={sources} />
       )}
 
-      {activeTab === 'plugins' && <PluginsPage />}
     </Box>
   )
 }

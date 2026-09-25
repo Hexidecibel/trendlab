@@ -51,16 +51,35 @@ def format_analysis_context(
     lines.append("")
 
     # Trend
-    lines.append(f"Trend direction: {analysis.trend.direction}")
-    lines.append(f"Momentum: {analysis.trend.momentum:.4f}")
-    lines.append(f"Acceleration: {analysis.trend.acceleration:.4f}")
+    trend = analysis.trend
+    lines.append(f"Trend direction: {trend.direction}")
+    if trend.momentum_pct_per_month is not None:
+        lines.append(
+            f"Momentum: {trend.momentum_label} "
+            f"(recent slope of the smoothed trend: "
+            f"{trend.momentum_pct_per_month:+.1f}% per month)"
+        )
+    else:
+        lines.append(f"Momentum: {trend.momentum:.4f}")
+    if trend.smoothed and trend.smoothed.slope_pct_per_month is not None:
+        lines.append(
+            "Whole-period fitted trend line: "
+            f"{trend.smoothed.slope_pct_per_month:+.1f}% per month"
+        )
     lines.append("")
+
+    # Key changes (plain English, most significant first)
+    if analysis.summary_lines:
+        lines.append("Key changes:")
+        for line in analysis.summary_lines:
+            lines.append(f"  - {line}")
+        lines.append("")
 
     # Seasonality
     if analysis.seasonality.detected:
         lines.append(
             f"Seasonality: detected with period of {analysis.seasonality.period_days} "
-            f"days (strength: {analysis.seasonality.strength:.2f})"
+            f"data points (strength: {analysis.seasonality.strength:.2f})"
         )
     else:
         lines.append("Seasonality: not detected")
@@ -88,7 +107,9 @@ def format_analysis_context(
     lines.append("")
 
     # Forecast
-    lines.append(f"Forecast horizon: {forecast.horizon} days")
+    lines.append(
+        f"Forecast horizon: {forecast.horizon} periods (at the series' own step)"
+    )
     lines.append(f"Recommended model: {forecast.recommended_model}")
     lines.append("")
 
