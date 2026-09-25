@@ -26,6 +26,8 @@ interface Props {
   resample?: string
   apply?: string
   anomalyMethod?: string
+  /** Smoothing preset on screen; carried in the share link (views don't store it). */
+  smoothing?: string
   /** Render as a compact icon button (used in the chart header). */
   iconOnly?: boolean
 }
@@ -39,6 +41,7 @@ export function SaveViewButton({
   resample,
   apply,
   anomalyMethod,
+  smoothing,
   iconOnly = false,
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -87,7 +90,10 @@ export function SaveViewButton({
   }
 
   const shareUrl = savedView
-    ? `${window.location.origin}?view=${savedView.hash_id}`
+    ? `${window.location.origin}${window.location.pathname}?${new URLSearchParams({
+        view: savedView.hash_id,
+        ...(smoothing ? { smooth: smoothing } : {}),
+      })}`
     : ''
 
   const handleCopy = async () => {

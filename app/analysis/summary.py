@@ -4,27 +4,20 @@ import datetime
 
 import numpy as np
 
+from app.analysis.level_shift import (
+    JUMP_MIN_PCT,
+    format_date,
+    jump_pct,
+    largest_step_near,
+)
 from app.analysis.trend_metrics import STABLE_PCT_PER_MONTH, slope_pct_per_month
 from app.models.schemas import Regime, StructuralBreak, TimeSeries
 
 MAX_SUMMARY_LINES = 4
 
-# A level shift across a break must be at least this big (%) to be reported
-JUMP_MIN_PCT = 20.0
-
 # Regimes shorter than this can't support a slope statement
 MIN_REGIME_POINTS = 5
 MIN_REGIME_DAYS = 28
-
-# Points either side of a break used to measure a level shift
-JUMP_WINDOW_POINTS = 7
-
-
-def format_date(d: datetime.date | str) -> str:
-    """Format as e.g. "Mar 3, 2026"."""
-    if isinstance(d, str):
-        d = datetime.date.fromisoformat(d)
-    return f"{d:%b} {d.day}, {d.year}"
 
 
 def format_rate(pct: float) -> str:
@@ -78,45 +71,6 @@ def _slope_line(before: float, after: float, when: str) -> str | None:
     return None
 
 
-def _jump_pct(values: np.ndarray, idx: int, left: int, right: int) -> float | None:
-    """Level shift (%) between the medians just before and after ``idx``."""
-    w = max(1, min(JUMP_WINDOW_POINTS, left, right))
-    before = values[max(0, idx - w) : idx]
-    after = values[idx : idx + w]
-    if len(before) == 0 or len(after) == 0:
-        return None
-    m0 = float(np.median(before))
-    m1 = float(np.median(after))
-    if m0 <= 0:
-        return None
-    pct = (m1 - m0) / m0 * 100.0
-    return pct if np.isfinite(pct) else None
-
-
-def _largest_step_near(values: np.ndarray, idx: int, rising: bool) -> int:
-    """Index where the level shift near ``idx`` actually happens.
-
-    CUSUM tends to place a break on the last point *before* a shift, so the
-    reported date is pinned to the candidate (within 3 points) with the
-    biggest shift between the means of the 7-point windows before and after
-    it. A 7-point window always spans a whole weekly cycle, so regular
-    weekend dips don't pull the date onto a Saturday.
-    """
-    n = len(values)
-    w = JUMP_WINDOW_POINTS
-    best, best_shift = idx, -np.inf
-    for j in range(max(1, idx - 3), min(n, idx + 4)):
-        before = values[max(0, j - w) : j]
-        after = values[j : j + w]
-        if len(before) == 0 or len(after) == 0:
-            continue
-        shift = float(np.mean(after) - np.mean(before))
-        shift = shift if rising else -shift
-        if shift > best_shift:
-            best, best_shift = j, shift
-    return best
-
-
 def build_summary_lines(
     ts: TimeSeries,
     breaks: list[StructuralBreak],
@@ -152,10 +106,10 @@ def build_summary_lines(
         when = format_date(start)
         left, right = seg_len(prev), seg_len(nxt)
 
-        jump = _jump_pct(values, idx, left, right)
+        jump = jump_pct(values, idx, left, right)
         if jump is not None and abs(jump) >= JUMP_MIN_PCT:
             verb = "Jumped" if jump > 0 else "Dropped"
-            step_idx = _largest_step_near(values, idx, rising=jump > 0)
+            step_idx = largest_step_near(values, idx, rising=jump > 0)
             step_when = format_date(ts.points[step_idx].date)
             candidates.append(
                 (abs(jump), f"{verb} {abs(jump):.0f}% around {step_when}")

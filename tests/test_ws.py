@@ -225,3 +225,113 @@ class TestProgressEmissionInRoutes:
                 assert "cache_check" in stages
                 assert "fetch" in stages
                 assert "complete" in stages
+
+
+class TestPendingEvents:
+    def test_events_before_subscribe_are_replayed(self):
+        bus = ProgressBus()
+        bus.emit("early", "cache_check", 0.1, "Checking cache")
+        bus.emit("early", "fetch", 0.3, "Fetching")
+        queue = bus.subscribe("early")
+        assert [queue.get_nowait().stage for _ in range(2)] == [
+            "cache_check",
+            "fetch",
+        ]
+        assert queue.empty()
+
+    def test_pending_is_bounded(self):
+        from app.services import progress as progress_mod
+
+        bus = ProgressBus()
+        for i in range(progress_mod.PENDING_MAX_IDS + 10):
+            bus.emit(f"id-{i}", "fetch", 0.3, "x")
+        assert len(bus._pending) == progress_mod.PENDING_MAX_IDS
+        # Oldest ids were evicted first
+        assert "id-0" not in bus._pending
+        for _ in range(progress_mod.PENDING_MAX_EVENTS + 5):
+            bus.emit("chatty", "fetch", 0.3, "x")
+        assert len(bus._pending["chatty"][1]) == progress_mod.PENDING_MAX_EVENTS
+
+    def test_pending_expires(self):
+        from app.services import progress as progress_mod
+
+        bus = ProgressBus()
+        with patch.object(progress_mod.time, "monotonic", return_value=1000.0):
+            bus.emit("old", "fetch", 0.3, "x")
+        later = 1000.0 + progress_mod.PENDING_TTL_SECONDS + 1
+        with patch.object(progress_mod.time, "monotonic", return_value=later):
+            queue = bus.subscribe("old")
+        assert queue.empty()
+
+
+class TestClientRequestId:
+    def test_resolve_request_id(self):
+        from app.middleware.logging import resolve_request_id
+
+        assert resolve_request_id("abc-123") == "abc-123"
+        uuid_like = "0b9e2c4e-6b1f-4c1a-9a55-2f3c9d7e8a10"
+        assert resolve_request_id(uuid_like) == uuid_like
+        for bad in (None, "", "a" * 65, "has space", "semi;colon", "ünï"):
+            generated = resolve_request_id(bad)
+            assert generated != bad
+            assert 0 < len(generated) <= 64
+
+    @pytest.mark.asyncio
+    async def test_header_is_echoed_and_used_for_progress(self):
+        """A sane X-Request-ID is echoed back and keys the progress events."""
+        import datetime
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.models.schemas import DataPoint, TimeSeries
+
+        fake_ts = TimeSeries(
+            source="pypi",
+            query="fastapi",
+            points=[
+                DataPoint(date=datetime.date(2024, 1, 1), value=100.0),
+                DataPoint(date=datetime.date(2024, 1, 2), value=200.0),
+            ],
+        )
+        rid = "frontend-req-42"
+        # Subscribe before the request, as the frontend's WebSocket does
+        queue = progress_bus.subscribe(rid)
+        try:
+            with (
+                patch("app.routers.api.registry.get") as mock_get,
+                patch("app.routers.api._cache") as mock_cache,
+            ):
+                mock_adapter = AsyncMock()
+                mock_adapter.name = "pypi"
+                mock_adapter.aggregation_method = "sum"
+                mock_adapter.custom_resample_periods = MagicMock(return_value=[])
+                mock_get.return_value = mock_adapter
+                mock_cache.fetch = AsyncMock(return_value=fake_ts)
+
+                async with AsyncClient(
+                    transport=ASGITransport(app=app), base_url="http://test"
+                ) as client:
+                    response = await client.get(
+                        "/api/series",
+                        params={"source": "pypi", "query": "fastapi"},
+                        headers={"X-Request-ID": rid},
+                    )
+
+            assert response.status_code == 200
+            assert response.headers["X-Request-ID"] == rid
+            stages = []
+            while not queue.empty():
+                stages.append(queue.get_nowait().stage)
+            assert stages[0] == "cache_check"
+            assert stages[-1] == "complete"
+        finally:
+            progress_bus.unsubscribe(rid)
+
+    @pytest.mark.asyncio
+    async def test_bad_header_is_replaced(self):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get(
+                "/api/sources", headers={"X-Request-ID": "bad id; drop"}
+            )
+        assert response.headers["X-Request-ID"] != "bad id; drop"

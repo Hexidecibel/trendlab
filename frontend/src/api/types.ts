@@ -35,6 +35,8 @@ export interface DataSourceInfo {
   description: string
   form_fields: FormField[]
   resample_periods: ResamplePeriod[]
+  /** "sum" for count-like sources (downloads, views), "mean" for levels. */
+  aggregation_method?: string
 }
 
 export interface LookupItem {
@@ -280,6 +282,8 @@ export interface CorrelateResponse {
   spearman: CorrelationCoefficient
   lag_analysis: LagCorrelation[]
   scatter: ScatterPoint[]
+  /** One lag unit: "day", "week", "month", ... (newer backends). */
+  lag_step?: string
 }
 
 // Cohort comparison types

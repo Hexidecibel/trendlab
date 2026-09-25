@@ -4,6 +4,7 @@ import math
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
+from app.forecasting.frequency import infer_step
 from app.models.schemas import (
     CorrelateResponse,
     CorrelationCoefficient,
@@ -98,4 +99,5 @@ def correlate(
         spearman=spearman_coeff,
         lag_analysis=lag_results,
         scatter=scatter,
+        lag_step=infer_step(dates).label,
     )

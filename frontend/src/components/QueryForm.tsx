@@ -111,8 +111,9 @@ export function QueryForm({ sources, loading, onSubmit, prefill, onSourceChange 
   const primaryFields = formFields.filter((f) => isPrimary(source, f))
   const advancedFields = formFields.filter((f) => !isPrimary(source, f))
 
-  // Apply a new prefill (NL result, saved view, recent query) during render.
-  if (prefill && prefill !== lastPrefill) {
+  // Apply a new prefill (NL result, saved view, recent query, URL) during
+  // render -- once the sources are known, so the query splits into fields.
+  if (prefill && prefill !== lastPrefill && sources.length > 0) {
     setLastPrefill(prefill)
     setSource(prefill.source)
     setHorizon(prefill.horizon)

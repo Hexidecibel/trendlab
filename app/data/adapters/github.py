@@ -12,6 +12,8 @@ GITHUB_API_URL = "https://api.github.com/repos/{owner_repo}/stargazers"
 class GitHubStarsAdapter(DataAdapter):
     name = "github_stars"
     description = "GitHub repo stargazers over time"
+    # Values are new stars per day, so buckets add up
+    aggregation_method = "sum"
 
     def __init__(self, token: str) -> None:
         self._token = token

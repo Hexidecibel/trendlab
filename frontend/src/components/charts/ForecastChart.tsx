@@ -8,12 +8,16 @@ import IconButton from '@mui/material/IconButton'
 import Switch from '@mui/material/Switch'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import { alpha, useTheme } from '@mui/material/styles'
 import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
 import type { Chart as ChartJS } from 'chart.js'
 import { fetchEventContext } from '../../api/client'
 import type { EventContext, TimeSeries, ForecastComparison, TrendAnalysis } from '../../api/types'
+import { SmoothingControl } from '../SmoothingControl'
+import { smoothedPoints } from '../../smoothing'
+import type { SmoothingPreset } from '../../smoothing'
 
 // Map resample frequency to Chart.js time unit
 type TimeUnit = 'day' | 'week' | 'month' | 'quarter' | 'year'
@@ -51,6 +55,9 @@ interface Props {
   resample?: string
   /** Extra header actions (e.g. Save View icon button). */
   actions?: ReactNode
+  /** Trend smoothing preset; the control is hidden when the analysis has no smoothed data. */
+  smoothing: SmoothingPreset
+  onSmoothingChange: (preset: SmoothingPreset) => void
 }
 
 const REGIME_COLORS: Record<string, string> = {
@@ -69,7 +76,11 @@ export function ForecastChart({
   onShowAnnotationsChange,
   resample,
   actions,
+  smoothing,
+  onSmoothingChange,
 }: Props) {
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
   const showBreaks = showAnnotations
   const showAnomalies = showAnnotations
   const showRegimes = showAnnotations
@@ -115,6 +126,25 @@ export function ForecastChart({
   if (!modelForecast) return null
 
   const actualData = series.points.map((p) => ({ x: p.date, y: p.value }))
+  const hasSmoothed = !!analysis?.trend.smoothed
+  const trendPoints = hasSmoothed ? smoothedPoints(analysis?.trend, smoothing) : null
+  // Primary for the line the eye should follow; lighter shade on dark paper
+  const primary = isDark ? theme.palette.primary.light : theme.palette.primary.main
+  const rawColor = trendPoints ? alpha(primary, isDark ? 0.35 : 0.3) : primary
+  const trendDataset = trendPoints
+    ? [
+        {
+          label: smoothing === 'line' ? 'Trend line' : `Trend (${smoothing})`,
+          data: trendPoints.map((p) => ({ x: p.date, y: p.value })),
+          borderColor: primary,
+          backgroundColor: primary,
+          pointRadius: 0,
+          borderWidth: 3,
+          tension: 0,
+          order: 0,
+        },
+      ]
+    : []
   const forecastData = modelForecast.points.map((p) => ({
     x: p.date,
     y: p.value,
@@ -130,13 +160,15 @@ export function ForecastChart({
 
   const data = {
     datasets: [
+      ...trendDataset,
       {
         label: 'Actual',
         data: actualData,
-        borderColor: '#3b82f6',
-        backgroundColor: '#3b82f6',
+        borderColor: rawColor,
+        backgroundColor: rawColor,
         pointRadius: 0,
-        borderWidth: 2,
+        borderWidth: trendPoints ? 1.25 : 2,
+        order: 1,
       },
       {
         label: forecastLabel || `Forecast (${selectedModel})`,
@@ -323,6 +355,13 @@ export function ForecastChart({
             {actions}
           </Box>
         </Box>
+        {hasSmoothed && (
+          <SmoothingControl
+            value={smoothing}
+            onChange={onSmoothingChange}
+            slopePctPerMonth={analysis?.trend.smoothed?.slope_pct_per_month}
+          />
+        )}
         <Box sx={{ height: { xs: 260, sm: 320 } }}>
           <Line ref={chartRef} data={data} options={options} />
         </Box>

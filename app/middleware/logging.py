@@ -1,5 +1,6 @@
 """Request/response logging middleware for FastAPI."""
 
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -15,6 +16,18 @@ from app.logging_config import (
 )
 
 logger = get_logger(__name__)
+
+# A client may supply its own request ID (the frontend does, so it can
+# subscribe to WebSocket progress for the request before it completes).
+# Anything that isn't a short, header/log-safe token is ignored.
+_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+
+
+def resolve_request_id(header_value: str | None) -> str:
+    """Use a sane client-supplied ``X-Request-ID``, else generate one."""
+    if header_value and _CLIENT_REQUEST_ID_RE.fullmatch(header_value):
+        return header_value
+    return generate_request_id()
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -32,8 +45,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         if path in self.SKIP_PATHS or path.startswith(self.SKIP_PREFIXES):
             return await call_next(request)
 
-        # Generate request ID and set context
-        request_id = generate_request_id()
+        # Accept the client's request ID (if sane) or generate one
+        request_id = resolve_request_id(request.headers.get("x-request-id"))
         ctx = {
             "request_id": request_id,
             "path": path,

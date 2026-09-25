@@ -4,6 +4,12 @@ import datetime
 
 import numpy as np
 
+from app.analysis.level_shift import (
+    JUMP_MIN_PCT,
+    format_short_date,
+    jump_pct,
+    largest_step_near,
+)
 from app.analysis.smoothing import (
     DAYS_PER_MONTH,
     day_numbers,
@@ -15,6 +21,7 @@ from app.models.schemas import (
     DataPoint,
     MovingAverage,
     SmoothedSeries,
+    StructuralBreak,
     TimeSeries,
     TrendSignal,
 )
@@ -32,6 +39,14 @@ STABLE_PCT_PER_MONTH = 2.0
 RECENT_SPAN_FRACTION = 0.25
 RECENT_SPAN_MIN_WINDOWS = 2
 MIN_RECENT_POINTS = 3
+
+# Break-aware momentum: when a structural break falls inside the recent span,
+# the slope is measured from the break onward only if at least this many
+# points (and at least two short seasonal cycles) have been seen since.
+MIN_POST_BREAK_POINTS = 10
+# Seasonal cycles longer than this (in days) are not used to trim/extend the
+# post-break span -- a yearly cycle is trend, not noise.
+MAX_CYCLE_TRIM_DAYS = 31.0
 
 
 def compute_momentum(values: np.ndarray) -> np.ndarray:
@@ -93,28 +108,127 @@ def slope_pct_per_month(
     return pct if np.isfinite(pct) else None
 
 
-def recent_slope_pct(
+def recent_span_points(
     dates: list[datetime.date],
-    smoothed: np.ndarray,
-    scale_values: np.ndarray | None = None,
+    n: int,
     seasonal_period: int | None = None,
-) -> float | None:
-    """Slope (% / month) of the recent part of a medium-smoothed line.
+) -> int:
+    """Points in the "recent" span used for momentum.
 
-    The span is the last ~25% of points, at least two medium windows and at
-    least 3 points (capped at the whole series).
+    The last ~25% of points, at least two medium windows and at least 3
+    points (capped at the whole series).
     """
-    n = len(smoothed)
-    if n < 2:
-        return None
     window = window_points("medium", median_spacing_days(dates), seasonal_period)
     k = max(
         MIN_RECENT_POINTS,
         int(np.ceil(n * RECENT_SPAN_FRACTION)),
         int(np.ceil(RECENT_SPAN_MIN_WINDOWS * window)),
     )
-    k = min(k, n)
+    return min(k, n)
+
+
+def recent_slope_pct(
+    dates: list[datetime.date],
+    smoothed: np.ndarray,
+    scale_values: np.ndarray | None = None,
+    seasonal_period: int | None = None,
+) -> float | None:
+    """Slope (% / month) of the recent part of a medium-smoothed line."""
+    n = len(smoothed)
+    if n < 2:
+        return None
+    k = recent_span_points(dates, n, seasonal_period)
     return slope_pct_per_month(dates[-k:], smoothed[-k:], scale_values)
+
+
+def _short_cycle(dates: list[datetime.date], seasonal_period: int | None) -> int | None:
+    """The seasonal period in points if it is a short (<= ~month) cycle."""
+    if not seasonal_period or seasonal_period <= 1:
+        return None
+    if seasonal_period * median_spacing_days(dates) > MAX_CYCLE_TRIM_DAYS:
+        return None
+    return seasonal_period
+
+
+def cycle_adjusted_slope_pct(
+    dates: list[datetime.date],
+    values: np.ndarray,
+    cycle: int | None,
+) -> float | None:
+    """Linear slope in % of level per month, with a short cycle factored out.
+
+    A plain least-squares fit over a few weeks of daily data is tilted by the
+    weekly pattern (weekend dips near one end pull the line), even over whole
+    weeks. Fitting ``value ~ a + b*t + phase dummies`` removes that bias.
+    Falls back to the plain fit without a cycle or with too few points.
+    """
+    n = len(values)
+    if not cycle or n < 2 * cycle:
+        return slope_pct_per_month(dates, values)
+    x = day_numbers(dates)
+    if float(np.ptp(x)) == 0.0:
+        return None
+    level = float(np.mean(values))
+    if not np.isfinite(level) or level <= 0:
+        return slope_pct_per_month(dates, values)
+    phase = np.arange(n) % cycle
+    design = np.column_stack(
+        [x] + [(phase == j).astype(np.float64) for j in range(cycle)]
+    )
+    coef, *_ = np.linalg.lstsq(design, values, rcond=None)
+    pct = float(coef[0]) * DAYS_PER_MONTH / level * 100.0
+    return pct if np.isfinite(pct) else None
+
+
+def post_break_momentum(
+    dates: list[datetime.date],
+    values: np.ndarray,
+    breaks: list[StructuralBreak],
+    seasonal_period: int | None = None,
+) -> tuple[float | None, str] | None:
+    """Momentum measured from the latest break inside the recent span.
+
+    A medium-smoothed line bends through a step change for about a window
+    after it, so after e.g. a sudden drop the "recent slope" reports a steep
+    decline even once the series has been flat at its new level for weeks.
+    When the most recent structural break lies inside the momentum span and
+    enough points have been seen since, the slope is instead a least-squares
+    fit of the raw values since the break, with a short seasonal cycle
+    (e.g. weekly) factored out so it doesn't tilt the line.
+
+    Returns ``(pct_per_month, label)`` or None when the regular trend-based
+    momentum should be used. A large level shift across the break (>= 20%)
+    is named in the label, e.g. "flat since drop on Aug 25", because it is
+    the real story when the post-break regime itself is flat.
+    """
+    n = len(values)
+    if n < MIN_POST_BREAK_POINTS or not breaks:
+        return None
+    span_start = n - recent_span_points(dates, n, seasonal_period)
+    indices = sorted({b.index for b in breaks if 0 < b.index < n})
+    in_span = [i for i in indices if i > span_start]
+    if not in_span:
+        return None
+    idx = in_span[-1]
+    earlier = [i for i in indices if i < idx]
+    prev_idx = earlier[-1] if earlier else 0
+
+    jump = jump_pct(values, idx, idx - prev_idx, n - idx)
+    big_jump = jump is not None and abs(jump) >= JUMP_MIN_PCT
+    if big_jump:
+        idx = largest_step_near(values, idx, rising=jump > 0)
+
+    cycle = _short_cycle(dates, seasonal_period)
+    need = max(MIN_POST_BREAK_POINTS, 2 * cycle if cycle else 0)
+    if n - idx < need:
+        return None
+
+    pct = cycle_adjusted_slope_pct(dates[idx:], values[idx:], cycle)
+    rate = format_momentum_label(pct)
+    if not big_jump:
+        return pct, rate
+    what = "drop" if jump < 0 else "jump"
+    return pct, f"{rate} since {what} on {format_short_date(dates[idx])}"
 
 
 def format_momentum_label(pct: float | None) -> str:
@@ -140,11 +254,14 @@ def analyze_trend(
     ts: TimeSeries,
     windows: list[int] | None = None,
     seasonal_period: int | None = None,
+    breaks: list[StructuralBreak] | None = None,
 ) -> TrendSignal:
     """Analyze a TimeSeries and return trend metrics.
 
     Direction and momentum come from the recent slope of the medium-smoothed
     trend line (robust LOWESS, ~1 month window), expressed in % per month.
+    If ``breaks`` are given and one falls inside that recent span, momentum
+    is measured from the break onward instead (see ``post_break_momentum``).
     """
     if windows is None:
         windows = [7, 30]
@@ -175,6 +292,10 @@ def analyze_trend(
     pct = recent_slope_pct(
         dates, medium, scale_values=values, seasonal_period=seasonal_period
     )
+    label = format_momentum_label(pct)
+    post = post_break_momentum(dates, values, breaks or [], seasonal_period)
+    if post is not None:
+        pct, label = post
     direction = classify_direction(pct)
     avg_momentum = (pct / 100.0) if pct is not None else 0.0
 
@@ -197,6 +318,6 @@ def analyze_trend(
         moving_averages=moving_averages,
         momentum_series=momentum_series,
         smoothed=smoothed,
-        momentum_label=format_momentum_label(pct),
+        momentum_label=label,
         momentum_pct_per_month=pct,
     )

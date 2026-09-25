@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import Accordion from '@mui/material/Accordion'
 import AccordionDetails from '@mui/material/AccordionDetails'
 import AccordionSummary from '@mui/material/AccordionSummary'
@@ -10,6 +10,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Collapse from '@mui/material/Collapse'
 import Divider from '@mui/material/Divider'
 import Grid from '@mui/material/Grid'
+import LinearProgress from '@mui/material/LinearProgress'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
@@ -17,8 +18,8 @@ import EditIcon from '@mui/icons-material/Edit'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useApi } from '../hooks/useApi'
 import { useWebSocket } from '../hooks/useWebSocket'
-import { ApiError, fetchCompare } from '../api/client'
-import type { CompareItem, NaturalCompareItem, TimeSeries, TrendAnalysis } from '../api/types'
+import { ApiError, fetchCompare, fetchCorrelate, fetchView } from '../api/client'
+import type { CompareItem, CorrelateResponse, NaturalCompareItem, TimeSeries, TrendAnalysis } from '../api/types'
 import { NaturalQueryInput } from './NaturalQueryInput'
 import { QueryForm } from './QueryForm'
 import type { QueryPrefill } from './QueryForm'
@@ -45,6 +46,10 @@ import { RecentAndSavedViews } from './RecentAndSavedViews'
 import type { SavedViewResponse } from '../api/types'
 import { clearRecentQueries, loadRecentQueries, recordRecentQuery } from '../recentQueries'
 import type { RecentQuery } from '../recentQueries'
+import { preferredSmoothing, storeSmoothing } from '../smoothing'
+import type { SmoothingPreset } from '../smoothing'
+import { parseUrlState, replaceUrlState } from '../urlState'
+import type { CompareMode, UrlState } from '../urlState'
 
 // Generate a friendly label from series metadata or query
 function getFriendlyLabel(s: TimeSeries): string {
@@ -52,7 +57,7 @@ function getFriendlyLabel(s: TimeSeries): string {
 
   // Try to build from metadata
   if (meta.article) return `${meta.article} (Wikipedia)`
-  if (meta.package) return `${meta.package} (PyPI)`
+  if (meta.package) return `${meta.package} (${s.source === 'npm' ? 'npm' : 'PyPI'})`
   if (meta.coin) return `${meta.coin} (Crypto)`
   if (meta.symbol) return `${meta.symbol} (${meta.metric || 'Stock'})`
   if (meta.team) return `${meta.team} (${meta.metric_label || 'xG'})`
@@ -92,15 +97,39 @@ export function Dashboard() {
   const [comparePrefill, setComparePrefill] = useState<ComparePrefill | null>(null)
   const [lastApply, setLastApply] = useState('')
 
+  // URL state read once on load (share links, bookmarks, reloads)
+  const [initialUrl] = useState<UrlState | null>(() => parseUrlState(window.location.search))
+  const initialUrlHandled = useRef(false)
+
+  // Smoothing: an explicit choice applies to the source it was made for;
+  // otherwise the user's remembered choice or the source default is used.
+  const [smoothingChoice, setSmoothingChoice] = useState<{ source: string; preset: SmoothingPreset } | null>(
+    () =>
+      initialUrl?.kind === 'forecast' && initialUrl.smooth
+        ? { source: initialUrl.source, preset: initialUrl.smooth }
+        : null,
+  )
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const [compareSmoothingChoice, setCompareSmoothingChoice] = useState<SmoothingPreset | null>(
+    () => (initialUrl?.kind === 'compare' && initialUrl.smooth) || null,
+  )
+  const [compareMode, setCompareMode] = useState<CompareMode>(
+    () => (initialUrl?.kind === 'compare' && initialUrl.mode) || 'index',
+  )
+  const [compareCorrelation, setCompareCorrelation] = useState<CorrelateResponse | null>(null)
+  const compareRunRef = useRef(0)
+
   const handleSubmit = (source: string, query: string, horizon: number, start?: string, end?: string, resample?: string, apply?: string, refresh?: boolean) => {
     setActiveTab('forecast')
-    setLastQuery({ source, query, horizon, resample: resample || '' })
-    setLastRange({ start, end })
-    setLastApply(apply || '')
-    setSelectedModel('')
     // Anomaly method is left to the backend default (trend-residual scoring).
+    // The query/range describing the chart only change once the new data is
+    // in: until then the previous chart stays up (dimmed) as it was.
     loadData(source, query, horizon, start, end, resample, apply, undefined, refresh).then((s) => {
       if (!s) return
+      setLastQuery({ source, query, horizon, resample: resample || '' })
+      setLastRange({ start, end })
+      setLastApply(apply || '')
+      setSelectedModel('')
       setRecent(
         recordRecentQuery({
           source,
@@ -129,7 +158,8 @@ export function Dashboard() {
     handleSubmit(source, query, horizon, start, end, resample, apply)
   }
 
-  const handleLoadView = (view: SavedViewResponse) => {
+  const handleLoadView = (view: SavedViewResponse, smooth?: SmoothingPreset | null) => {
+    if (smooth) setSmoothingChoice({ source: view.source, preset: smooth })
     loadWithPrefill(
       view.source,
       view.query,
@@ -160,21 +190,33 @@ export function Dashboard() {
   }
 
   const handleCompare = async (items: CompareItem[], resample?: string, apply?: string) => {
+    const run = ++compareRunRef.current
     setCompareLoading(true)
     setCompareError(null)
     setCompareSeries(null)
     setCompareAnalyses(null)
+    setCompareCorrelation(null)
     setCompareResample(resample || '')
     setCompareApply(apply || '')
     setCompareItems(items)
+    // Correlation stat for two-series compares; best effort, never blocks
+    if (items.length === 2) {
+      fetchCorrelate({ series_a: items[0], series_b: items[1], resample: resample || undefined })
+        .then((c) => {
+          if (compareRunRef.current === run) setCompareCorrelation(c)
+        })
+        .catch(() => {})
+    }
     try {
       const result = await fetchCompare(items, resample, apply)
+      if (compareRunRef.current !== run) return
       setCompareSeries(result.series)
       setCompareAnalyses(result.analyses ?? null)
     } catch (err) {
+      if (compareRunRef.current !== run) return
       setCompareError(err instanceof ApiError ? err : err instanceof Error ? err.message : String(err))
     } finally {
-      setCompareLoading(false)
+      if (compareRunRef.current === run) setCompareLoading(false)
     }
   }
 
@@ -197,6 +239,83 @@ export function Dashboard() {
     // Wait for next tick to ensure state updates are flushed before API call
     setTimeout(() => handleCompare(compareItems, resample), 0)
   }
+
+  // Restore the view encoded in the URL once, on first load
+  const restoreFromUrl = useEffectEvent(() => {
+    const u = initialUrl
+    if (!u) return
+    if (u.kind === 'view') {
+      fetchView(u.hash)
+        .then((view) => handleLoadView(view, u.smooth))
+        .catch((err) => {
+          setUrlError(
+            `Couldn't open the shared view: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        })
+    } else if (u.kind === 'forecast') {
+      loadWithPrefill(u.source, u.query, u.horizon, u.start, u.end, u.resample, u.apply)
+    } else {
+      setActiveTab('compare')
+      setComparePrefill({ items: u.items, resample: u.resample })
+      handleCompare(u.items, u.resample)
+    }
+  })
+  useEffect(() => {
+    if (initialUrlHandled.current) return
+    initialUrlHandled.current = true
+    restoreFromUrl()
+  }, [])
+
+  // Smoothing shown for the current chart
+  const smoothing: SmoothingPreset =
+    smoothingChoice && smoothingChoice.source === lastQuery.source
+      ? smoothingChoice.preset
+      : preferredSmoothing(lastQuery.source, sources)
+  const handleSmoothingChange = (preset: SmoothingPreset) => {
+    setSmoothingChoice({ source: lastQuery.source, preset })
+    storeSmoothing(lastQuery.source, preset)
+  }
+
+  // Compare: Medium when every series is count-like, else Raw (or the choice)
+  const compareSources = compareItems.map((i) => i.source)
+  const compareSmoothing: SmoothingPreset =
+    compareSmoothingChoice ??
+    (compareSources.length > 0 && compareSources.every((src) => preferredSmoothing(src, sources) !== 'raw')
+      ? 'medium'
+      : 'raw')
+
+  // Keep the URL in sync with what's on screen (replaceState, no history spam)
+  const urlState: UrlState | null =
+    activeTab === 'compare'
+      ? compareItems.length >= 2
+        ? {
+            kind: 'compare',
+            items: compareItems.map((i) => ({ source: i.source, query: i.query })),
+            resample: compareResample || undefined,
+            smooth: compareSmoothing,
+            mode: compareMode,
+          }
+        : null
+      : activeTab === 'forecast' && lastQuery.source && lastQuery.query
+        ? {
+            kind: 'forecast',
+            source: lastQuery.source,
+            query: lastQuery.query,
+            horizon: lastQuery.horizon,
+            start: lastRange.start,
+            end: lastRange.end,
+            resample: lastQuery.resample || undefined,
+            apply: lastApply || undefined,
+            smooth: smoothing,
+          }
+        : null
+  // Serialized so the effect runs only when the content changes. Nothing on
+  // screen (e.g. an empty tab, or a shared link still loading) leaves the
+  // current URL alone.
+  const urlKey = urlState ? JSON.stringify(urlState) : ''
+  useEffect(() => {
+    if (urlKey) replaceUrlState(JSON.parse(urlKey) as UrlState)
+  }, [urlKey])
 
   const effectiveModel =
     selectedModel || forecast?.recommended_model || ''
@@ -277,13 +396,30 @@ export function Dashboard() {
           </Box>
 
           {error && <ErrorAlert error={error} />}
+          {urlError && !hasData && <ErrorAlert error={urlError} />}
 
-          {loading && (
-            <ProgressBar progress={wsProgress} />
+          {loading && !hasData && <ProgressBar progress={wsProgress} />}
+
+          {loading && hasData && (
+            <LinearProgress
+              variant={wsProgress.connected && wsProgress.progress > 0 ? 'determinate' : 'indeterminate'}
+              value={Math.round(wsProgress.progress * 100)}
+              sx={{ mb: 1, borderRadius: 1 }}
+              aria-label="Loading new data"
+            />
           )}
 
           {hasData && (
-            <Grid container spacing={3}>
+            <Grid
+              container
+              spacing={3}
+              sx={{
+                opacity: loading ? 0.5 : 1,
+                transition: 'opacity 0.2s',
+                pointerEvents: loading ? 'none' : undefined,
+              }}
+              aria-busy={loading}
+            >
               <Grid size={{ xs: 12, lg: 8 }}>
                 <ForecastChart
                   series={series}
@@ -294,9 +430,12 @@ export function Dashboard() {
                   showAnnotations={showAnnotations}
                   onShowAnnotationsChange={setShowAnnotations}
                   resample={lastQuery.resample}
+                  smoothing={smoothing}
+                  onSmoothingChange={handleSmoothingChange}
                   actions={
                     <SaveViewButton
                       iconOnly
+                      smoothing={smoothing}
                       source={lastQuery.source}
                       query={lastQuery.query}
                       horizon={lastQuery.horizon}
@@ -311,6 +450,8 @@ export function Dashboard() {
                   <CausalImpactPanel
                     source={lastQuery.source}
                     query={lastQuery.query}
+                    start={lastRange.start}
+                    end={lastRange.end}
                     resample={lastQuery.resample || undefined}
                     apply={lastApply || undefined}
                   />
@@ -369,6 +510,10 @@ export function Dashboard() {
                       source={lastQuery.source}
                       query={lastQuery.query}
                       horizon={lastQuery.horizon}
+                      start={lastRange.start}
+                      end={lastRange.end}
+                      resample={lastQuery.resample || undefined}
+                      apply={lastApply || undefined}
                       series={series}
                       analysis={analysis}
                       forecast={forecast}
@@ -424,7 +569,16 @@ export function Dashboard() {
             <>
               <Grid container spacing={3}>
                 <Grid size={{ xs: 12, lg: compareAnalyses ? 8 : 12 }}>
-                  <CompareChart seriesList={compareSeries} resample={compareResample} />
+                  <CompareChart
+                    seriesList={compareSeries}
+                    analyses={compareAnalyses}
+                    resample={compareResample}
+                    smoothing={compareSmoothing}
+                    onSmoothingChange={setCompareSmoothingChoice}
+                    mode={compareMode}
+                    onModeChange={setCompareMode}
+                    correlation={compareCorrelation}
+                  />
                 </Grid>
                 {compareAnalyses && (
                   <Grid size={{ xs: 12, lg: 4 }}>

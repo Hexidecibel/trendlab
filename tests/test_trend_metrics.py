@@ -3,7 +3,7 @@ import datetime
 import pytest
 
 from app.analysis.trend_metrics import analyze_trend
-from app.models.schemas import DataPoint, TimeSeries
+from app.models.schemas import DataPoint, StructuralBreak, TimeSeries
 from tests.helpers import make_constant_series, make_linear_series
 
 
@@ -148,3 +148,93 @@ class TestTrendFromSmoothedLine:
         result = analyze_trend(ts)
         assert result.momentum_pct_per_month is None
         assert result.momentum_label == "flat"
+
+
+def _weekly_cycle(i: int) -> float:
+    """Multiplicative weekday pattern: weekends ~35% lower."""
+    return 0.65 if i % 7 in (5, 6) else 1.0
+
+
+def _step_series(
+    n_before: int, n_after: int, before: float, after: float, after_slope: float = 0.0
+) -> TimeSeries:
+    """Daily series with a weekly cycle and a level step at ``n_before``."""
+    start = datetime.date(2026, 3, 2)  # a Monday
+    points = []
+    for i in range(n_before + n_after):
+        if i < n_before:
+            level = before
+        else:
+            level = after + after_slope * (i - n_before)
+        points.append(
+            DataPoint(
+                date=start + datetime.timedelta(days=i),
+                value=level * _weekly_cycle(i),
+            )
+        )
+    return TimeSeries(source="test", query="step", points=points)
+
+
+def _break_at(ts: TimeSeries, idx: int) -> StructuralBreak:
+    return StructuralBreak(
+        date=ts.points[idx].date, index=idx, method="cusum", confidence=0.9
+    )
+
+
+class TestBreakAwareMomentum:
+    def test_flat_after_drop_is_not_falling(self):
+        # 150 days at 60, then a 30% drop and 25 days flat at 42
+        ts = _step_series(150, 25, before=60.0, after=42.0)
+        naive = analyze_trend(ts, seasonal_period=7)
+        assert naive.direction == "falling"  # the smooth bends through the step
+
+        result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 150)])
+        assert result.direction == "stable"
+        assert result.momentum_pct_per_month is not None
+        assert abs(result.momentum_pct_per_month) < 2.0
+        drop_day = ts.points[150].date
+        assert result.momentum_label == (
+            f"flat since drop on {drop_day:%b} {drop_day.day}"
+        )
+
+    def test_break_pinned_to_actual_step(self):
+        # CUSUM often reports the point before the shift
+        ts = _step_series(150, 25, before=60.0, after=42.0)
+        result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 149)])
+        drop_day = ts.points[150].date
+        assert result.momentum_label.endswith(f"{drop_day:%b} {drop_day.day}")
+
+    def test_growth_after_jump_reports_post_break_slope(self):
+        # Jump from 40 to 60, then +0.4/day (~+20%/month at level ~65)
+        ts = _step_series(150, 28, before=40.0, after=60.0, after_slope=0.4)
+        result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 150)])
+        assert result.direction == "rising"
+        assert result.momentum_label.startswith("+")
+        assert "since jump on" in result.momentum_label
+        assert 12.0 < result.momentum_pct_per_month < 25.0
+
+    def test_too_few_points_since_break_keeps_trend_momentum(self):
+        ts = _step_series(150, 8, before=60.0, after=42.0)
+        naive = analyze_trend(ts, seasonal_period=7)
+        result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 150)])
+        assert result.momentum_label == naive.momentum_label
+        assert result.direction == naive.direction
+
+    def test_break_outside_recent_span_is_ignored(self):
+        ts = make_linear_series(n=200, slope=1.0, intercept=100.0)
+        naive = analyze_trend(ts)
+        result = analyze_trend(ts, breaks=[_break_at(ts, 20)])
+        assert result.momentum_label == naive.momentum_label
+
+    def test_small_shift_uses_plain_rate_label(self):
+        # 5% step: not a notable level shift, label is just the rate
+        ts = _step_series(150, 30, before=60.0, after=63.0)
+        result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 150)])
+        assert "since" not in result.momentum_label
+        assert result.direction == "stable"
+
+    def test_weekly_cycle_does_not_tilt_post_break_slope(self):
+        # Flat post-break level starting on a Saturday (weekend dip first)
+        ts = _step_series(152, 26, before=60.0, after=42.0)
+        result = analyze_trend(ts, seasonal_period=7, breaks=[_break_at(ts, 152)])
+        assert abs(result.momentum_pct_per_month) < 1.0

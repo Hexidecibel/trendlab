@@ -14,7 +14,8 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import DownloadIcon from '@mui/icons-material/Download'
 import { Scatter, Bar } from 'react-chartjs-2'
-import type { ChartJS } from 'chart.js'
+import type { Chart as ChartJS } from 'chart.js'
+import { formatLagShort, lagAxisTitle } from '../utils/lag'
 import {
   Chart as ChartJSClass,
   LinearScale,
@@ -365,13 +366,13 @@ export function CorrelateTab({ sources }: Props) {
                   </Button>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                  Shows correlation at different time offsets (positive lag = Series B leads Series A)
+                  Shows correlation at different time offsets (positive lag = Series A leads Series B)
                 </Typography>
                 <Box sx={{ height: 250 }}>
                   <Bar
                     ref={lagChartRef}
                     data={{
-                      labels: result.lag_analysis.map(l => `${l.lag > 0 ? '+' : ''}${l.lag}d`),
+                      labels: result.lag_analysis.map(l => formatLagShort(l.lag, result.lag_step)),
                       datasets: [{
                         label: 'Correlation',
                         data: result.lag_analysis.map(l => l.correlation),
@@ -394,7 +395,7 @@ export function CorrelateTab({ sources }: Props) {
                           title: { display: true, text: 'Correlation' },
                         },
                         x: {
-                          title: { display: true, text: 'Lag (days)' },
+                          title: { display: true, text: lagAxisTitle(result.lag_step) },
                         },
                       },
                       plugins: {

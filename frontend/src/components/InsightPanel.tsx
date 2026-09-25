@@ -21,12 +21,28 @@ interface Props {
   source: string
   query: string
   horizon: number
+  /** The charted view, so the AI sees the same data as the chart. */
+  start?: string
+  end?: string
+  resample?: string
+  apply?: string
   series?: TimeSeries
   analysis?: TrendAnalysis
   forecast?: ForecastComparison
 }
 
-export function InsightPanel({ source, query, horizon, series, analysis, forecast }: Props) {
+export function InsightPanel({
+  source,
+  query,
+  horizon,
+  start,
+  end,
+  resample,
+  apply,
+  series,
+  analysis,
+  forecast,
+}: Props) {
   const [initialInsight, setInitialInsight] = useState('')
   const [status, setStatus] = useState<
     'idle' | 'loading' | 'streaming' | 'done' | 'unavailable' | 'error'
@@ -105,6 +121,10 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
       query,
       horizon: String(horizon),
     })
+    if (start) params.set('start', start)
+    if (end) params.set('end', end)
+    if (resample) params.set('resample', resample)
+    if (apply) params.set('apply', apply)
     const es = new EventSource(`${API_BASE}/insight?${params}`)
     eventSourceRef.current = es
 
@@ -135,7 +155,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
     }
 
     return () => es.close()
-  }, [source, query, horizon])
+  }, [source, query, horizon, start, end, resample, apply])
 
   const handleSendMessage = async () => {
     if (!input.trim() || followupStatus === 'streaming') return
@@ -161,6 +181,10 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
           messages: conversationMessages,
           context_summary: initialInsight,
           data_context: dataContext,
+          start: start || undefined,
+          end: end || undefined,
+          resample: resample || undefined,
+          apply: apply || undefined,
         }),
       })
 
@@ -204,7 +228,7 @@ export function InsightPanel({ source, query, horizon, series, analysis, forecas
           }
         }
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev.slice(0, -1), // Remove placeholder
         { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },

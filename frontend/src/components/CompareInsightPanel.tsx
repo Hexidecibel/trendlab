@@ -258,7 +258,7 @@ export function CompareInsightPanel({ items, resample, apply, seriesList, analys
           }
         }
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev.slice(0, -1),
         { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },

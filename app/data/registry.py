@@ -26,6 +26,7 @@ class AdapterRegistry:
                 description=a.description,
                 form_fields=a.form_fields(),
                 resample_periods=a.custom_resample_periods(),
+                aggregation_method=a.aggregation_method,
             )
             for a in self._adapters.values()
         ]

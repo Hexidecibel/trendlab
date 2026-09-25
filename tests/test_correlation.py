@@ -105,3 +105,26 @@ class TestCorrelate:
         result = correlate(ts, ts)
         assert result.pearson.r == pytest.approx(1.0)
         assert result.spearman.r == pytest.approx(1.0)
+
+
+class TestLagStep:
+    def test_daily_lag_step(self):
+        ts = _make_ts([float(i % 5) for i in range(20)])
+        assert correlate(ts, ts).lag_step == "day"
+
+    def test_weekly_lag_step(self):
+        start = datetime.date(2025, 1, 6)
+        points = [
+            DataPoint(date=start + datetime.timedelta(weeks=i), value=float(i % 4))
+            for i in range(12)
+        ]
+        ts = TimeSeries(source="t", query="w", points=points)
+        assert correlate(ts, ts).lag_step == "week"
+
+    def test_monthly_lag_step(self):
+        points = [
+            DataPoint(date=datetime.date(2025, m, 1), value=float(m % 3))
+            for m in range(1, 13)
+        ]
+        ts = TimeSeries(source="t", query="m", points=points)
+        assert correlate(ts, ts).lag_step == "month"

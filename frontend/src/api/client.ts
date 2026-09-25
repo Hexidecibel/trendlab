@@ -92,8 +92,8 @@ async function extractError(response: Response): Promise<ApiError> {
   }
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init)
   if (!response.ok) {
     throw await extractError(response)
   }
@@ -162,9 +162,14 @@ export async function fetchForecast(
   resample?: string,
   apply?: string,
   refresh?: boolean,
+  requestId?: string,
 ): Promise<ForecastComparison> {
   const qs = buildParams({ source, query, horizon, start, end, resample, apply, refresh: refresh ? 'true' : undefined })
-  return fetchJson(`${API_BASE}/forecast?${qs}`)
+  // The request id keys the server's WebSocket progress events
+  return fetchJson(
+    `${API_BASE}/forecast?${qs}`,
+    requestId ? { headers: { 'X-Request-ID': requestId } } : undefined,
+  )
 }
 
 export async function fetchLookup(

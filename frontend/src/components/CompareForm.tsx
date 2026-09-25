@@ -60,7 +60,8 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
 
   // Apply prefill when it changes
   useEffect(() => {
-    if (!prefill || prefill === lastPrefill) return
+    // Wait for sources so the query can be split into the source's fields
+    if (!prefill || prefill === lastPrefill || sources.length === 0) return
     setLastPrefill(prefill)
     prefillRef.current = true
     setResample(prefill.resample || '')
@@ -312,7 +313,6 @@ export function CompareForm({ sources, loading, onSubmit, prefill }: Props) {
                 <MenuItem value="week">Weekly</MenuItem>
                 <MenuItem value="month">Monthly</MenuItem>
                 <MenuItem value="quarter">Quarterly</MenuItem>
-                <MenuItem value="season">Seasonal</MenuItem>
                 <MenuItem value="year">Yearly</MenuItem>
                 {/* Show custom resample periods from selected sources */}
                 {Array.from(new Set(

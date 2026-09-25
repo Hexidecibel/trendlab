@@ -13,7 +13,9 @@ def analyze(ts: TimeSeries, anomaly_method: str = "residual") -> TrendAnalysis:
     """Run all analysis modules and return a combined TrendAnalysis.
 
     Seasonality runs first so its period can floor the smoothing window used
-    for the trend line and for residual-based anomaly detection.
+    for the trend line and for residual-based anomaly detection. Structural
+    breaks run before the trend so momentum can be measured from the most
+    recent break rather than through a step change.
     """
     if len(ts.points) == 0:
         raise ValueError("Cannot analyze empty series")
@@ -28,7 +30,7 @@ def analyze(ts: TimeSeries, anomaly_method: str = "residual") -> TrendAnalysis:
         source=ts.source,
         query=ts.query,
         series_length=len(ts.points),
-        trend=analyze_trend(ts, seasonal_period=period),
+        trend=analyze_trend(ts, seasonal_period=period, breaks=breaks),
         seasonality=seasonality,
         anomalies=analyze_anomalies(
             ts, method=anomaly_method, seasonal_period=period

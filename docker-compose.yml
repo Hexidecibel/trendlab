@@ -4,7 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      # Host port 9393 matches the bin/update deployment; the app listens on 8000 inside
+      - "9393:8000"
     environment:
       - DEBUG=${DEBUG:-false}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}

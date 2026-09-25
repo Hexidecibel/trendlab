@@ -23,7 +23,7 @@ import Typography from '@mui/material/Typography'
 import DownloadIcon from '@mui/icons-material/Download'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import { Line } from 'react-chartjs-2'
-import type { ChartJS } from 'chart.js'
+import type { Chart as ChartJS } from 'chart.js'
 import type { CohortResponse, DataSourceInfo, LookupItem } from '../api/types'
 import { ApiError, fetchCohort, fetchLookup } from '../api/client'
 import { ErrorAlert } from './ErrorAlert'
@@ -49,7 +49,7 @@ export function CohortPanel({ sources }: Props) {
   const [error, setError] = useState<string | ApiError | null>(null)
   const [result, setResult] = useState<CohortResponse | null>(null)
   const [lookup, setLookup] = useState<LookupItem[]>([])
-  const chartRef = useRef<ChartJS<'line'>>(null)
+  const chartRef = useRef<ChartJS<'line', { x: string; y: number }[]>>(null)
 
   const loadLookup = async (src: string) => {
     if (!src) {

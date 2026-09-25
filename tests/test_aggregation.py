@@ -157,3 +157,87 @@ class TestEmptySeries:
         ts = TimeSeries(source="test", query="test", points=[])
         result = resample_series(ts, "week", method="mean")
         assert len(result.points) == 0
+
+
+def _daily_between(
+    start: datetime.date, end: datetime.date, value: float = 10.0
+) -> TimeSeries:
+    n = (end - start).days + 1
+    points = [
+        DataPoint(date=start + datetime.timedelta(days=i), value=value)
+        for i in range(n)
+    ]
+    return TimeSeries(source="test", query="test", points=points)
+
+
+class TestPartialEdgeBuckets:
+    def test_sum_drops_sparse_first_and_last_month(self):
+        # Jan 28 .. May 5: January has 4 days, May has 5 days
+        ts = _daily_between(datetime.date(2025, 1, 28), datetime.date(2025, 5, 5))
+        result = resample_series(ts, "month", method="sum")
+        assert [p.date.month for p in result.points] == [2, 3, 4]
+        assert result.points[0].value == pytest.approx(28 * 10.0)
+        assert result.metadata["partial_buckets_dropped"] == [
+            "2025-01-01",
+            "2025-05-01",
+        ]
+
+    def test_sum_keeps_mostly_covered_edges(self):
+        # Jan 3 .. Apr 28: both edges cover > 90% of their month
+        ts = _daily_between(datetime.date(2025, 1, 3), datetime.date(2025, 4, 28))
+        result = resample_series(ts, "month", method="sum")
+        assert [p.date.month for p in result.points] == [1, 2, 3, 4]
+        assert "partial_buckets_dropped" not in result.metadata
+
+    def test_mean_never_drops(self):
+        ts = _daily_between(datetime.date(2025, 1, 28), datetime.date(2025, 5, 5))
+        result = resample_series(ts, "month", method="mean")
+        assert len(result.points) == 5
+
+    def test_sum_drops_majority_covered_but_incomplete_week(self):
+        # A 4-of-7-day week would read as a 43% drop in a summed series
+        ts = _daily_between(datetime.date(2025, 1, 6), datetime.date(2025, 1, 30))
+        result = resample_series(ts, "week", method="sum")
+        assert result.points[-1].date == datetime.date(2025, 1, 20)
+        assert result.points[-1].value == pytest.approx(70.0)
+
+    def test_sum_weekly_partial_last_week(self):
+        # Mon Jan 6 .. Wed Jan 29: last ISO week (Jan 27) only has 3 days
+        ts = _daily_between(datetime.date(2025, 1, 6), datetime.date(2025, 1, 29))
+        result = resample_series(ts, "week", method="sum")
+        assert [p.date for p in result.points] == [
+            datetime.date(2025, 1, 6),
+            datetime.date(2025, 1, 13),
+            datetime.date(2025, 1, 20),
+        ]
+
+    def test_monthly_native_series_is_not_treated_as_partial(self):
+        # Monthly data dated on the 1st covers its whole month
+        points = [
+            DataPoint(date=datetime.date(2025, m, 1), value=100.0)
+            for m in range(1, 7)
+        ]
+        ts = TimeSeries(source="test", query="m", points=points)
+        result = resample_series(ts, "quarter", method="sum")
+        assert [p.value for p in result.points] == [300.0, 300.0]
+
+    def test_sparse_counts_are_not_penalised_for_gaps(self):
+        # Only a few days per month have data (e.g. GitHub stars), but the
+        # series spans Jan 1 .. Apr 30 so every month is fully covered.
+        days = [
+            datetime.date(2025, m, d) for m in range(1, 5) for d in (1, 15)
+        ] + [datetime.date(2025, 4, 30)]
+        points = [DataPoint(date=d, value=1.0) for d in days]
+        ts = TimeSeries(source="test", query="gh", points=points)
+        result = resample_series(ts, "month", method="sum")
+        assert len(result.points) == 4
+
+    def test_keeps_edges_when_too_few_buckets_would_remain(self):
+        ts = _daily_between(datetime.date(2025, 1, 28), datetime.date(2025, 2, 3))
+        result = resample_series(ts, "month", method="sum")
+        assert len(result.points) == 2
+
+    def test_year_bucket_partial(self):
+        ts = _daily_between(datetime.date(2023, 12, 1), datetime.date(2026, 2, 1))
+        result = resample_series(ts, "year", method="sum")
+        assert [p.date.year for p in result.points] == [2024, 2025]

@@ -142,8 +142,9 @@
 - Default TTLs: crypto 15min, pypi 6hr, asa 24hr, github_stars 1hr
 
 ### Time-Based Aggregation
-- `?resample` query param: `week`, `month`, `quarter`, `season`, `year`
-- Aggregation method per adapter: `sum` for counts (PyPI), `mean` for rates (crypto)
+- `?resample` query param: `week`, `month`, `quarter`, `year` (legacy `season` = `year`)
+- Aggregation method per adapter: `sum` for counts (PyPI, npm, Wikipedia, GitHub stars), `mean` for levels (crypto, stocks, weather); exposed as `aggregation_method` on `/api/sources`
+- Summed edge buckets covering < 90% of their period are dropped (listed in `metadata.partial_buckets_dropped`), so a partial first/last month or week doesn't read as a crash or a surge
 - Applied between fetch and downstream consumers
 - Period buckets: ISO week start, 1st of month, quarter starts, calendar year
 
@@ -232,12 +233,6 @@
 - Endpoints: `POST /upload-csv`, `GET /uploads`, `DELETE /uploads/{id}`
 - Frontend: `CSVUpload.tsx` with drag-and-drop, preview, upload
 
-### Reddit Adapter
-- `app/data/adapters/reddit.py`
-- Fetches subreddit metrics (subscribers, active users)
-- Uses Reddit JSON API (no authentication required)
-- Current snapshot only (API limitation)
-
 ---
 
 ## Tier 6: UX Enhancements
@@ -292,12 +287,31 @@
 
 ---
 
+## 2026-09 Overhaul: Smoothing, Trend Lines, Flow
+
+### Backend (Wave 1)
+- `smoothing.py`: robust LOWESS presets (light ≈ week, medium ≈ month, heavy ≈ quarter) plus a fitted trend line with slope in %/month, returned as `trend.smoothed` on every analysis
+- Direction/momentum from the smoothed trend (`momentum_label`, e.g. "+3.2% / month"); anomalies scored against the trend
+- Momentum is break-aware: after a recent structural break it is measured from the break (weekly cycle factored out), e.g. "flat since drop on Aug 25"
+- Frequency-aware forecast dates and horizons; seasonal period fed to AutoETS
+- Plain-English `summary_lines` ("Dropped 38% around Aug 25") fed to the AI prompts; `/insight` sees the same range/resample/transforms as the chart
+- Reddit adapter and the duplicate `season` resample removed
+
+### Frontend (Waves 1-2)
+- Plain-English search as the main input; technical options behind "Edit query" and "Advanced"
+- Smoothing control (Raw · Light · Medium · Heavy · Line) on the forecast and compare charts: raw data faint, trend bold; Line shows its slope. Defaults to Medium for count sources, Raw otherwise; last choice remembered per source
+- Compare defaults to Index = 100 (each series rebased at the first common date) with a Raw values toggle, plus a correlation stat for two-series compares ("r = 0.82 (strong), best at lag 3 weeks")
+- URL state: source, query, range, resample, transforms and smoothing live in the query string; reloads and `?view=<hash>` share links restore the view
+- Progress bar works: the frontend's request id is sent as `X-Request-ID`, accepted by the logging middleware, and keys the WebSocket progress events (events emitted before the socket subscribes are held briefly)
+- The previous chart stays visible (dimmed) while a new query loads
+- Correlate lag labels use the series step (days/weeks/months)
+
 ## Architecture Summary
 
 | Layer | What | Key Signal |
 |-------|------|-----------|
-| Data adapters (10+) | PyPI, npm, GitHub, CoinGecko, Football, ASA, Wikipedia, Yahoo Finance, Weather, CSV + plugins | Pluggable architecture |
-| Trend detection | Momentum, seasonality, anomalies, structural breaks | Analytical depth |
+| Data adapters (10+) | PyPI, npm, GitHub, CoinGecko, Football, ASA, Wikipedia, Yahoo Finance, Weather, Google Trends, CSV + plugins | Pluggable architecture |
+| Trend detection | Smoothed trends + trend lines, momentum, seasonality, anomalies, structural breaks | Analytical depth |
 | Forecasting | 4 models + backtest evaluation + accuracy tracking | Model comparison, skepticism |
 | AI commentary | LLM-generated narrative via SSE + insights feed | LLM integration done right |
 | Frontend | React + MUI + Chart.js dashboard | Full-stack delivery |
@@ -317,6 +331,6 @@
 - python-multipart (file uploads)
 
 ### Frontend
-- React 18, Vite, TypeScript
+- React 19, Vite, TypeScript
 - @mui/material, @mui/icons-material (UI components)
 - chart.js, react-chartjs-2, chartjs-plugin-annotation, chartjs-plugin-zoom

@@ -63,6 +63,9 @@ class DataSourceInfo(BaseModel):
     description: str
     form_fields: list[FormField] = Field(default_factory=list)
     resample_periods: list[ResamplePeriod] = Field(default_factory=list)
+    # How values combine when resampled: "sum" for counts (downloads, views,
+    # stars), "mean" for levels (prices, temperatures, indices)
+    aggregation_method: str = "mean"
 
 
 class LookupItem(BaseModel):
@@ -269,6 +272,9 @@ class CorrelateResponse(BaseModel):
     spearman: CorrelationCoefficient
     lag_analysis: list[LagCorrelation]
     scatter: list[ScatterPoint]
+    # One lag unit = one step of the aligned series: "day", "week", "month",
+    # "quarter", "year", or e.g. "3 days"
+    lag_step: str = "day"
 
 
 # --- Comparison models ---

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -51,7 +51,7 @@ export function ForecastAccuracyPanel({ source, query, forecast }: Props) {
   const [accuracyResults, setAccuracyResults] = useState<Record<number, AccuracyResult>>({})
   const [loadingAccuracy, setLoadingAccuracy] = useState<Record<number, boolean>>({})
 
-  const loadSnapshots = async () => {
+  const loadSnapshots = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams({ source, query, limit: '10' })
@@ -65,13 +65,13 @@ export function ForecastAccuracyPanel({ source, query, forecast }: Props) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [source, query])
 
   useEffect(() => {
     if (expanded) {
       loadSnapshots()
     }
-  }, [expanded, source, query])
+  }, [expanded, loadSnapshots])
 
   const handleSaveSnapshot = async () => {
     setSaving(true)

@@ -18,11 +18,13 @@ import { ErrorAlert } from './ErrorAlert'
 interface Props {
   source: string
   query: string
+  start?: string
+  end?: string
   resample?: string
   apply?: string
 }
 
-export function CausalImpactPanel({ source, query, resample, apply }: Props) {
+export function CausalImpactPanel({ source, query, start, end, resample, apply }: Props) {
   const [eventDate, setEventDate] = useState('')
   const [result, setResult] = useState<CausalImpactResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -36,6 +38,8 @@ export function CausalImpactPanel({ source, query, resample, apply }: Props) {
     setResult(null)
     try {
       const data = await fetchCausalImpact(source, query, eventDate, {
+        start,
+        end,
         resample,
         apply,
       })

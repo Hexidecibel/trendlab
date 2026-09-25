@@ -33,7 +33,6 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive'
 import SendIcon from '@mui/icons-material/Send'
 import type {
   DataSourceInfo,
-  NotificationConfig,
   NotificationStatus,
   WatchlistItem,
   WatchlistAddRequest,
