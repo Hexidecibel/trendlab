@@ -103,7 +103,7 @@ class TestSummarize:
             "Downloads for fastapi are rising steadily. "
             "The linear model forecasts continued growth."
         )
-        mock_client.model = "claude-sonnet-4-20250514"
+        mock_client.model = "claude-sonnet-5"
 
         result = await summarize(_make_analysis(), _make_forecast(), client=mock_client)
         assert isinstance(result, InsightReport)
@@ -117,7 +117,7 @@ class TestSummarize:
 
         mock_client = AsyncMock()
         mock_client.generate.return_value = "Summary text."
-        mock_client.model = "claude-sonnet-4-20250514"
+        mock_client.model = "claude-sonnet-5"
 
         result = await summarize(
             _make_analysis(),

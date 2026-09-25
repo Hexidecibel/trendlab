@@ -77,7 +77,7 @@ class TestInsightReport:
             ],
             recommended_action="Monitor closely",
             prompt_version="default",
-            model_used="claude-sonnet-4-20250514",
+            model_used="claude-sonnet-5",
         )
         data = report.model_dump()
         assert data["source"] == "pypi"
@@ -85,7 +85,7 @@ class TestInsightReport:
         assert len(data["risk_flags"]) == 1
         assert data["recommended_action"] == "Monitor closely"
         assert data["prompt_version"] == "default"
-        assert data["model_used"] == "claude-sonnet-4-20250514"
+        assert data["model_used"] == "claude-sonnet-5"
         restored = InsightReport.model_validate(data)
         assert restored == report
 
@@ -99,7 +99,7 @@ class TestInsightReport:
             risk_flags=[],
             recommended_action=None,
             prompt_version="concise",
-            model_used="claude-sonnet-4-20250514",
+            model_used="claude-sonnet-5",
         )
         data = report.model_dump()
         assert data["risk_flags"] == []

@@ -8,7 +8,12 @@ import anthropic
 class LLMClient:
     """Thin wrapper around the Anthropic SDK."""
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514") -> None:
+    # Sonnet 5 thinks by default when `thinking` is omitted (Sonnet 4 didn't).
+    # Thinking counts against max_tokens, and our callers use small limits
+    # (512-1024), so keep it off explicitly to preserve the old behavior.
+    THINKING = {"type": "disabled"}
+
+    def __init__(self, api_key: str, model: str = "claude-sonnet-5") -> None:
         self.model = model
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
 
@@ -34,6 +39,7 @@ class LLMClient:
             max_tokens=max_tokens,
             system=system,
             messages=user_messages,
+            thinking=self.THINKING,
         )
         return response.content[0].text
 
@@ -47,6 +53,7 @@ class LLMClient:
             max_tokens=max_tokens,
             system=system,
             messages=user_messages,
+            thinking=self.THINKING,
         ) as stream:
             async for text in stream.text_stream:
                 yield text
