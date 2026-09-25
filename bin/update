@@ -19,6 +19,8 @@ echo "Starting new container..."
 docker run -d --name trendlab \
   -p 9393:8000 \
   --env-file .env \
+  -e DATABASE_URL=sqlite+aiosqlite:///./data/trendlab.db \
+  -v trendlab-data:/app/data \
   --restart unless-stopped \
   trendlab
 
